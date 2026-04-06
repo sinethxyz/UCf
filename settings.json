@@ -1,0 +1,95 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx next build:*)",
+      "Bash(npm test:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(alembic:*)",
+      "Bash(git:*)",
+      "Bash(jq:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(diff:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": [
+      "Read(*.env)",
+      "Read(*.env.*)",
+      "Read(*secrets*)",
+      "Read(*credentials*)",
+      "Read(*.pem)",
+      "Read(*.key)",
+      "Read(*service-account*)",
+      "Edit(*.env)",
+      "Edit(*.env.*)",
+      "Edit(*secrets*)",
+      "Edit(*credentials*)",
+      "Edit(*.pem)",
+      "Edit(*.key)",
+      "Edit(*service-account*)",
+      "Write(*.env)",
+      "Write(*.env.*)",
+      "Write(*secrets*)",
+      "Write(*credentials*)",
+      "Write(*.pem)",
+      "Write(*.key)",
+      "Write(*service-account*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(rm -rf /:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write",
+        "command": "hooks/pre_tool_use/block_secrets.sh",
+        "timeout_ms": 5000
+      },
+      {
+        "matcher": "Edit|Write",
+        "command": "hooks/pre_tool_use/block_protected_paths.sh",
+        "timeout_ms": 5000
+      },
+      {
+        "matcher": "Edit|Write",
+        "command": "hooks/pre_tool_use/require_plan.sh",
+        "timeout_ms": 5000
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "hooks/post_tool_use/verify_after_edit.sh",
+        "timeout_ms": 30000
+      },
+      {
+        "matcher": "*",
+        "command": "hooks/post_tool_use/log_tool_call.sh",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "additionalDirectories": [],
+  "contextFiles": [
+    "canon/docs/event_taxonomy.md",
+    "canon/docs/evidence_taxonomy.md"
+  ]
+}
