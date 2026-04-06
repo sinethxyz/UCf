@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: foundry
+      POSTGRES_USER: foundry
+      POSTGRES_PASSWORD: foundry
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  foundry:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      FOUNDRY_DATABASE_URL: postgresql+asyncpg://foundry:foundry@postgres:5432/foundry
+      FOUNDRY_REDIS_URL: redis://redis:6379/0
+      FOUNDRY_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FOUNDRY_GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./artifacts:/app/artifacts
+      - worktrees:/tmp/foundry-worktrees
+
+volumes:
+  pgdata:
+  worktrees:
