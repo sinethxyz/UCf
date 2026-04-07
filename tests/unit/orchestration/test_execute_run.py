@@ -136,10 +136,10 @@ def mock_pr_creator() -> MagicMock:
 @pytest.fixture
 def mock_verification_runner() -> MagicMock:
     runner = MagicMock()
-    runner.run_all = AsyncMock(return_value=[
+    runner.run_all = AsyncMock(return_value=([
         VerificationResult(check_type="go_build", passed=True, output="ok", duration_ms=1000),
         VerificationResult(check_type="go_test", passed=True, output="PASS", duration_ms=2000),
-    ])
+    ], True))
     return runner
 
 
@@ -412,12 +412,12 @@ class TestExecuteRunVerificationFailure:
         sample_task_request: TaskRequest,
         mock_verification_runner,
     ):
-        mock_verification_runner.run_all = AsyncMock(return_value=[
+        mock_verification_runner.run_all = AsyncMock(return_value=([
             VerificationResult(
                 check_type="go_test", passed=False,
                 output="FAIL", duration_ms=1000,
             ),
-        ])
+        ], False))
 
         with patch("asyncio.create_subprocess_exec", return_value=_make_git_mock()):
             response = await run_engine.execute_run(sample_task_request)
@@ -431,12 +431,12 @@ class TestExecuteRunVerificationFailure:
         mock_verification_runner,
         mock_pr_creator,
     ):
-        mock_verification_runner.run_all = AsyncMock(return_value=[
+        mock_verification_runner.run_all = AsyncMock(return_value=([
             VerificationResult(
                 check_type="go_test", passed=False,
                 output="FAIL", duration_ms=1000,
             ),
-        ])
+        ], False))
 
         with patch("asyncio.create_subprocess_exec", return_value=_make_git_mock()):
             await run_engine.execute_run(sample_task_request)

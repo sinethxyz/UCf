@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from foundry.verification.go_verify import GoVerifier, VerificationResult
+from foundry.verification.go_verify import GoVerifier, StepResult, VerificationResult
 
 
 def _make_proc(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"") -> AsyncMock:
@@ -265,3 +265,130 @@ async def test_verify_output_contains_step_headers():
     assert "=== go_build" in result.output
     assert "=== go_vet" in result.output
     assert "=== go_test" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Per-step details
+# ---------------------------------------------------------------------------
+
+
+async def test_verify_all_pass_details():
+    """On success, details contains three StepResult objects all with passed=True."""
+    procs = [
+        _make_proc(0, b"build ok"),
+        _make_proc(0, b"vet ok"),
+        _make_proc(0, b"PASS"),
+    ]
+
+    verifier = GoVerifier()
+    with patch("foundry.verification.go_verify.asyncio") as mock_asyncio:
+        mock_asyncio.create_subprocess_exec = AsyncMock(side_effect=procs)
+        mock_asyncio.subprocess = __import__("asyncio").subprocess
+
+        result = await verifier.verify("/fake/worktree")
+
+    assert len(result.details) == 3
+    assert all(isinstance(d, StepResult) for d in result.details)
+    assert [d.step_name for d in result.details] == ["go_build", "go_vet", "go_test"]
+    assert all(d.passed for d in result.details)
+    assert all(d.duration_ms >= 0 for d in result.details)
+
+
+async def test_verify_build_fail_details():
+    """When build fails, details has one entry with passed=False."""
+    build_proc = _make_proc(1, b"", b"compile error")
+
+    verifier = GoVerifier()
+    with patch("foundry.verification.go_verify.asyncio") as mock_asyncio:
+        mock_asyncio.create_subprocess_exec = AsyncMock(return_value=build_proc)
+        mock_asyncio.subprocess = __import__("asyncio").subprocess
+
+        result = await verifier.verify("/fake/worktree")
+
+    assert len(result.details) == 1
+    assert result.details[0].step_name == "go_build"
+    assert result.details[0].passed is False
+    assert "compile error" in result.details[0].output
+
+
+async def test_verify_vet_fail_details():
+    """When vet fails, details has build (passed) + vet (failed)."""
+    procs = [
+        _make_proc(0, b"build ok"),
+        _make_proc(1, b"", b"unreachable code"),
+    ]
+
+    verifier = GoVerifier()
+    with patch("foundry.verification.go_verify.asyncio") as mock_asyncio:
+        mock_asyncio.create_subprocess_exec = AsyncMock(side_effect=procs)
+        mock_asyncio.subprocess = __import__("asyncio").subprocess
+
+        result = await verifier.verify("/fake/worktree")
+
+    assert len(result.details) == 2
+    assert result.details[0].step_name == "go_build"
+    assert result.details[0].passed is True
+    assert result.details[1].step_name == "go_vet"
+    assert result.details[1].passed is False
+    assert "unreachable code" in result.details[1].output
+
+
+async def test_verify_test_fail_details():
+    """When test fails, details has build + vet (passed) + test (failed)."""
+    procs = [
+        _make_proc(0, b"build ok"),
+        _make_proc(0, b"vet ok"),
+        _make_proc(1, b"--- FAIL: TestFoo", b"FAIL"),
+    ]
+
+    verifier = GoVerifier()
+    with patch("foundry.verification.go_verify.asyncio") as mock_asyncio:
+        mock_asyncio.create_subprocess_exec = AsyncMock(side_effect=procs)
+        mock_asyncio.subprocess = __import__("asyncio").subprocess
+
+        result = await verifier.verify("/fake/worktree")
+
+    assert len(result.details) == 3
+    assert result.details[0].passed is True
+    assert result.details[1].passed is True
+    assert result.details[2].step_name == "go_test"
+    assert result.details[2].passed is False
+    assert "FAIL: TestFoo" in result.details[2].output
+
+
+async def test_verify_step_output_includes_stderr():
+    """Each StepResult.output includes both stdout and stderr."""
+    procs = [
+        _make_proc(0, b"stdout part", b"stderr part"),
+        _make_proc(0, b"ok"),
+        _make_proc(0, b"ok"),
+    ]
+
+    verifier = GoVerifier()
+    with patch("foundry.verification.go_verify.asyncio") as mock_asyncio:
+        mock_asyncio.create_subprocess_exec = AsyncMock(side_effect=procs)
+        mock_asyncio.subprocess = __import__("asyncio").subprocess
+
+        result = await verifier.verify("/fake/worktree")
+
+    assert "stdout part" in result.details[0].output
+    assert "stderr part" in result.details[0].output
+
+
+async def test_verify_step_duration_tracked():
+    """Each StepResult has a non-negative duration_ms."""
+    procs = [
+        _make_proc(0, b"ok"),
+        _make_proc(0, b"ok"),
+        _make_proc(0, b"ok"),
+    ]
+
+    verifier = GoVerifier()
+    with patch("foundry.verification.go_verify.asyncio") as mock_asyncio:
+        mock_asyncio.create_subprocess_exec = AsyncMock(side_effect=procs)
+        mock_asyncio.subprocess = __import__("asyncio").subprocess
+
+        result = await verifier.verify("/fake/worktree")
+
+    for step in result.details:
+        assert step.duration_ms >= 0

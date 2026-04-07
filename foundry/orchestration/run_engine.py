@@ -695,7 +695,12 @@ class RunEngine:
             if line.startswith("?? "):
                 changed_files.append(line[3:])
 
-        results = await self.verification_runner.run_all(worktree_path, changed_files)
+        results, passed = await self.verification_runner.run_all(
+            worktree_path,
+            changed_files,
+            run_id=run_id,
+            session=self.session,
+        )
 
         # Store verification artifact
         verification_data = json.dumps(
@@ -710,20 +715,7 @@ class RunEngine:
             storage_path, len(verification_data.encode()),
         )
 
-        # Persist individual VerificationResult rows
-        from foundry.db.models import VerificationResult as VRModel
-        for r in results:
-            vr = VRModel(
-                run_id=run_id,
-                check_type=r.check_type,
-                passed=r.passed,
-                output=r.output[:10000],
-                duration_ms=r.duration_ms,
-            )
-            self.session.add(vr)
-        await self.session.flush()
-
-        return all(r.passed for r in results)
+        return passed
 
     async def _run_review(
         self,
