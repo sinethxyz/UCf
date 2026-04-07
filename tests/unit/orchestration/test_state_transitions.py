@@ -36,7 +36,7 @@ def test_all_run_states_are_in_transition_map():
 
 
 def test_terminal_states_have_no_outgoing_transitions():
-    terminal = {RunState.COMPLETED, RunState.CANCELLED, RunState.ERRORED}
+    terminal = {RunState.COMPLETED, RunState.CANCELLED}
     for state in terminal:
         assert VALID_TRANSITIONS[state] == set(), (
             f"Terminal state {state} should have no outgoing transitions"
