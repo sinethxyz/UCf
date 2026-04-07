@@ -171,10 +171,8 @@ class RunEngine:
         await run_queries.add_run_event(self.session, event)
 
         try:
-            # 2. Create worktree
-            await self._transition(run_id, RunState.QUEUED, RunState.CREATING_WORKTREE, "Creating worktree")
+            # 2. Create worktree (handles QUEUED → CREATING_WORKTREE → PLANNING)
             worktree_path = await self._create_worktree(run_id, task_request)
-            await self._transition(run_id, RunState.CREATING_WORKTREE, RunState.PLANNING, "Worktree created")
 
             # 3. Run planning
             try:
@@ -369,6 +367,13 @@ class RunEngine:
     ) -> str:
         """Create an isolated git worktree for the run.
 
+        Handles the full QUEUED → CREATING_WORKTREE → PLANNING transition:
+        1. Transition to CREATING_WORKTREE
+        2. Derive branch name from task type and title
+        3. Create the worktree via WorktreeManager
+        4. Update the run record with worktree_path and branch_name
+        5. Transition to PLANNING
+
         Args:
             run_id: ID of the current run.
             task_request: Task request containing repo and branch info.
@@ -378,20 +383,32 @@ class RunEngine:
         """
         from foundry.git.branch import generate_branch_name
 
+        # 1. Transition QUEUED → CREATING_WORKTREE
+        await self._transition(
+            run_id, RunState.QUEUED, RunState.CREATING_WORKTREE, "Creating worktree",
+        )
+
+        # 2. Derive branch name
         branch_name = generate_branch_name(task_request.task_type, task_request.title)
 
+        # 3. Create worktree
         worktree_path = await self.worktree_manager.create(
             repo=task_request.repo,
             branch_name=branch_name,
             run_id=run_id,
         )
 
-        # Update run record with worktree info
+        # 4. Update run record with worktree info
         run = await run_queries.get_run(self.session, run_id)
         if run is not None:
             run.worktree_path = worktree_path
             run.branch_name = branch_name
             await self.session.flush()
+
+        # 5. Transition CREATING_WORKTREE → PLANNING
+        await self._transition(
+            run_id, RunState.CREATING_WORKTREE, RunState.PLANNING, "Worktree created",
+        )
 
         return worktree_path
 
