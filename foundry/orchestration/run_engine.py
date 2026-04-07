@@ -17,6 +17,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import redis.asyncio as aioredis
+
 from foundry.contracts.review_models import ReviewVerdict
 from foundry.contracts.run_models import RunResponse
 from foundry.contracts.shared import RunState
@@ -79,20 +81,24 @@ VALID_TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.CREATING_WORKTREE: {
         RunState.PLANNING,
         RunState.ERRORED,
+        RunState.CANCELLED,
     },
     RunState.PLANNING: {
         RunState.IMPLEMENTING,
         RunState.PLAN_FAILED,
         RunState.ERRORED,
+        RunState.CANCELLED,
     },
     RunState.IMPLEMENTING: {
         RunState.VERIFYING,
         RunState.ERRORED,
+        RunState.CANCELLED,
     },
     RunState.VERIFYING: {
         RunState.VERIFICATION_PASSED,
         RunState.VERIFICATION_FAILED,
         RunState.ERRORED,
+        RunState.CANCELLED,
     },
     RunState.VERIFICATION_PASSED: {
         RunState.REVIEWING,
@@ -102,12 +108,13 @@ VALID_TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.PR_OPENED,
         RunState.REVIEW_FAILED,
         RunState.ERRORED,
+        RunState.CANCELLED,
     },
     RunState.PR_OPENED: {
         RunState.COMPLETED,
         RunState.ERRORED,
     },
-    # Retry: failure states can go back to queued
+    # Retry: failure states and errored can go back to queued
     RunState.PLAN_FAILED: {
         RunState.QUEUED,
     },
@@ -117,10 +124,12 @@ VALID_TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.REVIEW_FAILED: {
         RunState.QUEUED,
     },
+    RunState.ERRORED: {
+        RunState.QUEUED,
+    },
     # Terminal states — no outgoing transitions
     RunState.COMPLETED: set(),
     RunState.CANCELLED: set(),
-    RunState.ERRORED: set(),
 }
 
 # States that can be cancelled via cancel_run()
@@ -130,13 +139,18 @@ _CANCELLABLE_STATES: set[RunState] = {
     RunState.PLANNING,
     RunState.IMPLEMENTING,
     RunState.VERIFYING,
-    RunState.VERIFICATION_PASSED,
     RunState.REVIEWING,
-    RunState.PR_OPENED,
+}
+
+# States that can be retried via retry_run()
+_RETRYABLE_STATES: set[RunState] = {
     RunState.PLAN_FAILED,
     RunState.VERIFICATION_FAILED,
     RunState.REVIEW_FAILED,
+    RunState.ERRORED,
 }
+
+QUEUE_KEY = "foundry:runs"
 
 
 class RunEngine:
@@ -156,6 +170,7 @@ class RunEngine:
         agent_runner: AgentRunner,
         pr_creator: PRCreator,
         verification_runner: VerificationRunner,
+        redis: aioredis.Redis | None = None,
     ) -> None:
         self.session = session
         self.artifact_store = artifact_store
@@ -163,6 +178,7 @@ class RunEngine:
         self.agent_runner = agent_runner
         self.pr_creator = pr_creator
         self.verification_runner = verification_runner
+        self.redis = redis
 
     # ------------------------------------------------------------------
     # Public API
@@ -320,8 +336,9 @@ class RunEngine:
     async def retry_run(self, run_id: UUID) -> RunResponse:
         """Retry a failed run by transitioning it back to QUEUED.
 
-        Only runs in plan_failed, verification_failed, or review_failed
-        states can be retried.
+        Only runs in plan_failed, verification_failed, review_failed,
+        or errored states can be retried. Cleans up any existing worktree
+        and re-enqueues the run for worker processing.
 
         Args:
             run_id: ID of the run to retry.
@@ -337,14 +354,35 @@ class RunEngine:
             raise ValueError(f"Run {run_id} not found")
 
         current_state = RunState(run.state)
-        retryable = {RunState.PLAN_FAILED, RunState.VERIFICATION_FAILED, RunState.REVIEW_FAILED}
-        if current_state not in retryable:
+        if current_state not in _RETRYABLE_STATES:
             raise ValueError(
                 f"Run {run_id} in state {current_state.value} is not retryable. "
-                f"Only runs in {', '.join(s.value for s in retryable)} can be retried."
+                f"Only runs in {', '.join(s.value for s in sorted(_RETRYABLE_STATES, key=lambda s: s.value))} can be retried."
             )
 
         await self._transition(run_id, current_state, RunState.QUEUED, "Retrying run")
+
+        # Clean up worktree if it exists and clear the path on the run row
+        if run.worktree_path:
+            try:
+                await self.worktree_manager.cleanup(run.worktree_path)
+            except Exception:
+                logger.warning("Failed to clean up worktree for retried run %s", run_id)
+            run.worktree_path = None
+            await self.session.flush()
+
+        # Re-enqueue for worker processing
+        if self.redis is not None:
+            payload = json.dumps({
+                "task_type": run.task_type,
+                "repo": run.repo,
+                "base_branch": run.base_branch,
+                "title": run.title,
+                "prompt": run.prompt,
+                "mcp_profile": run.mcp_profile,
+                "_run_id": str(run_id),
+            })
+            await self.redis.lpush(QUEUE_KEY, payload)
 
         return await _build_run_response(self.session, run_id)
 
