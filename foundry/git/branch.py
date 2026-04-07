@@ -1,21 +1,39 @@
-"""Branch naming and management utilities.
+"""Branch naming and validation utilities.
 
-Convention: foundry/{task-type}-{short-kebab-description}
+Convention: foundry/{task-type}-{slugified-title} (max 60 chars).
 """
 
+import re
 
-def make_branch_name(task_type: str, description: str) -> str:
+from foundry.contracts.shared import TaskType
+
+
+def generate_branch_name(task_type: TaskType, title: str) -> str:
     """Generate a branch name following Foundry conventions.
 
     Args:
-        task_type: The task type (e.g., 'endpoint_build').
-        description: Short description of the change.
+        task_type: The Foundry task type enum value.
+        title: Short human-readable description of the change.
 
     Returns:
-        Branch name like 'foundry/endpoint-build-company-timeline'.
+        Branch name like 'foundry/endpoint-build-company-timeline',
+        truncated to a maximum of 60 characters.
     """
-    slug = task_type.replace("_", "-")
-    desc_slug = description.lower().replace(" ", "-").replace("_", "-")
-    # Truncate to keep branch names reasonable
-    desc_slug = desc_slug[:50].rstrip("-")
-    return f"foundry/{slug}-{desc_slug}"
+    slug = task_type.value.replace("_", "-")
+    desc_slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    full = f"foundry/{slug}-{desc_slug}"
+    if len(full) > 60:
+        full = full[:60].rstrip("-")
+    return full
+
+
+def is_foundry_branch(branch_name: str) -> bool:
+    """Check whether a branch name follows the Foundry naming convention.
+
+    Args:
+        branch_name: The branch name to validate.
+
+    Returns:
+        True if the branch starts with 'foundry/' prefix.
+    """
+    return branch_name.startswith("foundry/")

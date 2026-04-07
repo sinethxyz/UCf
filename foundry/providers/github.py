@@ -1,8 +1,12 @@
-"""GitHub REST/GraphQL client for PR creation and repo operations."""
+"""GitHub REST API client for PR creation and repo operations."""
 
 
-class GitHubProvider:
-    """Provider for GitHub API interactions."""
+class GitHubClient:
+    """Client for GitHub API interactions.
+
+    Handles pull request creation, commenting, labeling, and
+    file listing for Foundry's PR workflow.
+    """
 
     def __init__(self, token: str | None = None) -> None:
         self.token = token
@@ -14,7 +18,6 @@ class GitHubProvider:
         base: str,
         title: str,
         body: str,
-        labels: list[str] | None = None,
     ) -> dict:
         """Create a pull request.
 
@@ -24,22 +27,52 @@ class GitHubProvider:
             base: Target branch.
             title: PR title.
             body: PR body markdown.
-            labels: Labels to apply.
 
         Returns:
-            PR metadata with url, number, html_url.
+            Dict with 'url', 'number', and 'html_url'.
         """
-        raise NotImplementedError
+        raise NotImplementedError("Phase 1")
 
-    async def add_comment(self, repo: str, issue_number: int, body: str) -> dict:
-        """Add a comment to an issue or PR.
+    async def add_pr_comment(self, repo: str, pr_number: int, body: str) -> None:
+        """Add a comment to a pull request.
 
         Args:
             repo: Repository in 'owner/name' format.
-            issue_number: Issue or PR number.
+            pr_number: PR number.
             body: Comment body markdown.
+        """
+        raise NotImplementedError("Phase 1")
+
+    async def add_pr_labels(self, repo: str, pr_number: int, labels: list[str]) -> None:
+        """Add labels to a pull request.
+
+        Args:
+            repo: Repository in 'owner/name' format.
+            pr_number: PR number.
+            labels: List of label names to apply.
+        """
+        raise NotImplementedError("Phase 1")
+
+    async def get_pr(self, repo: str, pr_number: int) -> dict:
+        """Get pull request details.
+
+        Args:
+            repo: Repository in 'owner/name' format.
+            pr_number: PR number.
 
         Returns:
-            Comment metadata.
+            PR metadata dict.
         """
-        raise NotImplementedError
+        raise NotImplementedError("Phase 1")
+
+    async def list_pr_files(self, repo: str, pr_number: int) -> list[dict]:
+        """List files changed in a pull request.
+
+        Args:
+            repo: Repository in 'owner/name' format.
+            pr_number: PR number.
+
+        Returns:
+            List of dicts with filename, status, additions, deletions.
+        """
+        raise NotImplementedError("Phase 1")
