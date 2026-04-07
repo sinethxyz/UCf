@@ -1,31 +1,47 @@
 """Structured run event logging.
 
-All run state transitions and tool calls are logged as structured events.
+All run state transitions, tool calls, and model invocations are
+logged as structured RunEvent records.
 """
 
 from uuid import UUID
 
+from foundry.contracts.run_models import RunEvent
+
 
 class LogStore:
-    """Manages structured event logging for runs."""
+    """Structured event logging for runs.
 
-    async def log_event(self, run_id: UUID, event_type: str, data: dict) -> None:
-        """Log a structured event for a run.
+    Persists RunEvent objects for full run traceability and replay.
+    """
+
+    async def append_event(self, run_id: UUID, event: RunEvent) -> None:
+        """Append a structured event to a run's event log.
 
         Args:
             run_id: The run this event belongs to.
-            event_type: Type of event (state_transition, tool_call, etc.).
-            data: Event payload.
+            event: The RunEvent to persist.
         """
-        raise NotImplementedError
+        raise NotImplementedError("Phase 1")
 
-    async def get_events(self, run_id: UUID) -> list[dict]:
-        """Retrieve all events for a run.
+    async def get_events(self, run_id: UUID) -> list[RunEvent]:
+        """Retrieve all events for a run in chronological order.
 
         Args:
             run_id: The run to get events for.
 
         Returns:
-            List of event dicts ordered by timestamp.
+            List of RunEvent objects ordered by timestamp.
         """
-        raise NotImplementedError
+        raise NotImplementedError("Phase 1")
+
+    async def get_latest_event(self, run_id: UUID) -> RunEvent | None:
+        """Retrieve the most recent event for a run.
+
+        Args:
+            run_id: The run to get the latest event for.
+
+        Returns:
+            The most recent RunEvent, or None if no events exist.
+        """
+        raise NotImplementedError("Phase 1")

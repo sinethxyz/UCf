@@ -1,15 +1,24 @@
-"""TypeScript verification: tsc, eslint, next build."""
+"""TypeScript verification: tsc, eslint, next build.
+
+Runs the full TypeScript/Next.js verification suite against a worktree.
+"""
+
+from foundry.verification.go_verify import VerificationResult
 
 
-async def verify_typescript(worktree_path: str) -> dict:
-    """Run TypeScript verification suite on a worktree.
+class TypeScriptVerifier:
+    """Runs TypeScript verification checks: tsc, eslint, next build."""
 
-    Executes: tsc --noEmit, eslint.
+    async def verify(self, worktree_path: str) -> VerificationResult:
+        """Run the full TypeScript verification suite on a worktree.
 
-    Args:
-        worktree_path: Path to the worktree to verify.
+        Executes in order: tsc --noEmit, eslint, next build.
+        Stops on first failure.
 
-    Returns:
-        Dict with check results.
-    """
-    raise NotImplementedError
+        Args:
+            worktree_path: Absolute path to the worktree to verify.
+
+        Returns:
+            VerificationResult with aggregated check outcome.
+        """
+        raise NotImplementedError("Phase 1")

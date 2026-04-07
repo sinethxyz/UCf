@@ -1,18 +1,40 @@
-"""Go verification: build, test, vet, and lint."""
+"""Go verification: build, vet, test, and lint.
 
-import subprocess
-from pathlib import Path
+Runs the full Go verification suite in sequence against a worktree.
+"""
+
+from dataclasses import dataclass
 
 
-async def verify_go(worktree_path: str) -> dict:
-    """Run Go verification suite on a worktree.
+@dataclass
+class VerificationResult:
+    """Result of a single verification check."""
 
-    Executes in order: go build, go vet, go test.
+    check_type: str
+    passed: bool
+    output: str
+    duration_ms: int
 
-    Args:
-        worktree_path: Path to the worktree to verify.
 
-    Returns:
-        Dict with check results: {check_type: {passed, output, duration_ms}}.
-    """
-    raise NotImplementedError
+class GoVerifier:
+    """Runs Go verification checks: build, vet, test, golangci-lint."""
+
+    async def verify(
+        self,
+        worktree_path: str,
+        packages: list[str] | None = None,
+    ) -> VerificationResult:
+        """Run the full Go verification suite on a worktree.
+
+        Executes in order: go build, go vet, go test, golangci-lint.
+        Stops on first failure.
+
+        Args:
+            worktree_path: Absolute path to the worktree to verify.
+            packages: Optional list of Go packages to check. Defaults
+                to './...' (all packages).
+
+        Returns:
+            VerificationResult with aggregated check outcome.
+        """
+        raise NotImplementedError("Phase 1")
