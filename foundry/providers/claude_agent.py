@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Any
 
-import anthropic
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 logger = logging.getLogger(__name__)
 
@@ -20,123 +20,89 @@ class ClaudeAgentProvider:
     Used for agentic workflows where Claude needs tools: planning,
     implementation, and review subagents.
 
-    Phase 1 uses the Anthropic Messages API with manual tool-use loops
-    until the Agent SDK stabilises. The interface is forward-compatible
-    with a future Agent SDK swap.
+    Creates agent sessions via the Claude Agent SDK's ``query()`` function.
+    Each run gets a fresh session with the specified system prompt, model,
+    tools, and optional structured output schema.
     """
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key
-        self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
+
+    async def _collect_result(
+        self, prompt: str, options: ClaudeAgentOptions
+    ) -> ResultMessage:
+        """Run a query and collect the final ResultMessage from the stream."""
+        result_msg: ResultMessage | None = None
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                result_msg = message
+
+        if result_msg is None:
+            raise RuntimeError("Agent session ended without a ResultMessage")
+        if result_msg.is_error:
+            errors = ", ".join(result_msg.errors or ["Unknown error"])
+            raise RuntimeError(f"Agent session failed: {errors}")
+
+        return result_msg
 
     async def run(
         self,
         system_prompt: str,
         user_message: str,
-        tools: list[dict[str, Any]] | None = None,
         model: str = "claude-sonnet-4-6",
-        output_schema: dict[str, Any] | None = None,
-        mcp_profile: str | None = None,
-        max_turns: int = 50,
-        tool_handler: Any | None = None,
+        tools: list[str] | None = None,
+        working_directory: str | None = None,
     ) -> dict:
-        """Run an agent session with optional tools and structured output.
+        """Run an agent session with optional tools.
 
-        Uses multi-turn Messages API with tool_use/tool_result loops.
+        Creates an agent via the Claude Agent SDK with the given system
+        prompt, model, and tools. Runs the agent with the user message.
 
         Args:
             system_prompt: System instructions for the agent.
             user_message: The user-facing prompt to execute.
-            tools: List of Anthropic tool definitions (dicts with name, description, input_schema).
             model: Model identifier (default: claude-sonnet-4-6).
-            output_schema: Optional JSON Schema to constrain output.
-            mcp_profile: Optional MCP profile name for tool access.
-            max_turns: Maximum conversation turns before forced stop.
-            tool_handler: Async callable(tool_name, tool_input) -> tool_result.
+            tools: List of tool names (e.g. ["Read", "Grep", "Glob"]).
+            working_directory: Working directory for tool execution scoping.
 
         Returns:
-            Agent output as a dict containing response and metadata.
+            Dict with keys: response, raw_text, model, tokens_in,
+            tokens_out, duration_ms.
         """
         start = time.monotonic()
-        total_input_tokens = 0
-        total_output_tokens = 0
 
-        messages = [{"role": "user", "content": user_message}]
+        options = ClaudeAgentOptions(
+            system_prompt=system_prompt,
+            model=model,
+            tools=tools or [],
+            cwd=working_directory,
+            permission_mode="bypassPermissions",
+            max_turns=50,
+        )
 
-        for turn in range(max_turns):
-            response = await self._client.messages.create(
-                model=model,
-                max_tokens=8192,
-                system=system_prompt,
-                messages=messages,
-                tools=tools or [],
-            )
-
-            total_input_tokens += response.usage.input_tokens
-            total_output_tokens += response.usage.output_tokens
-
-            # Check if we need to handle tool use
-            if response.stop_reason == "tool_use" and tool_handler is not None:
-                # Build assistant message with all content blocks
-                messages.append({"role": "assistant", "content": response.content})
-
-                # Process each tool use block
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        try:
-                            result = await tool_handler(block.name, block.input)
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": str(result),
-                            })
-                        except Exception as e:
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": f"Error: {e}",
-                                "is_error": True,
-                            })
-
-                messages.append({"role": "user", "content": tool_results})
-                continue
-
-            # Extract text response
-            text_content = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    text_content += block.text
-
-            duration_ms = int((time.monotonic() - start) * 1000)
-
-            # Try to parse as JSON
-            parsed = text_content
-            try:
-                parsed = json.loads(text_content)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-            return {
-                "response": parsed,
-                "raw_text": text_content,
-                "model": model,
-                "tokens_in": total_input_tokens,
-                "tokens_out": total_output_tokens,
-                "duration_ms": duration_ms,
-                "turns": turn + 1,
-            }
-
+        result_msg = await self._collect_result(user_message, options)
         duration_ms = int((time.monotonic() - start) * 1000)
+
+        # Extract text output and attempt JSON parse
+        text = result_msg.result or ""
+        parsed: Any = text
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Extract token counts from usage dict
+        usage = result_msg.usage or {}
+        tokens_in = usage.get("input_tokens", 0)
+        tokens_out = usage.get("output_tokens", 0)
+
         return {
-            "response": None,
-            "raw_text": "",
+            "response": parsed,
+            "raw_text": text,
             "model": model,
-            "tokens_in": total_input_tokens,
-            "tokens_out": total_output_tokens,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
             "duration_ms": duration_ms,
-            "turns": max_turns,
-            "error": "Max turns exceeded",
         }
 
     async def run_with_structured_output(
@@ -144,32 +110,79 @@ class ClaudeAgentProvider:
         system_prompt: str,
         user_message: str,
         model: str,
-        output_schema: dict[str, Any],
+        output_schema: type,
+        tools: list[str] | None = None,
+        working_directory: str | None = None,
     ) -> dict:
         """Run an agent session that must return structured output.
 
-        Uses the system prompt to enforce JSON output and validates the
-        response against the provided schema.
+        Uses the Agent SDK's output_format parameter with a JSON schema
+        derived from the provided Pydantic model. Validates the response
+        against the schema after parsing.
 
         Args:
             system_prompt: System instructions for the agent.
             user_message: The user-facing prompt to execute.
             model: Model identifier.
-            output_schema: JSON Schema the output must conform to.
+            output_schema: Pydantic model class for output validation.
+            tools: List of tool names (e.g. ["Read", "Grep", "Glob"]).
+            working_directory: Working directory for tool execution scoping.
 
         Returns:
-            Validated structured output as a dict.
+            Dict with keys: response (validated Pydantic instance), model,
+            tokens_in, tokens_out, duration_ms.
         """
-        result = await self.run(
+        start = time.monotonic()
+
+        # Derive JSON schema from Pydantic model for the SDK
+        json_schema = output_schema.model_json_schema()
+
+        options = ClaudeAgentOptions(
             system_prompt=system_prompt,
-            user_message=user_message,
             model=model,
+            tools=tools or [],
+            output_format=json_schema,
+            cwd=working_directory,
+            permission_mode="bypassPermissions",
+            max_turns=50,
         )
 
-        response = result.get("response")
-        if response is None or isinstance(response, str):
-            raise ValueError(
-                f"Expected structured JSON output but got: {result.get('raw_text', '')[:200]}"
+        result_msg = await self._collect_result(user_message, options)
+        duration_ms = int((time.monotonic() - start) * 1000)
+
+        # Parse structured output — prefer structured_output if the SDK
+        # populated it, otherwise fall back to parsing result text.
+        output = result_msg.structured_output
+        if output is None:
+            raw = result_msg.result or ""
+            try:
+                output = json.loads(raw)
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise ValueError(
+                    f"Expected structured JSON output but got: {raw[:200]}"
+                ) from exc
+
+        # Validate response against the Pydantic model.
+        # Use model_validate_json for dict→JSON round-trip to handle
+        # strict-mode coercion (e.g. UUID strings).
+        if isinstance(output, output_schema):
+            validated = output
+        elif isinstance(output, dict):
+            validated = output_schema.model_validate_json(json.dumps(output))
+        else:
+            validated = output_schema.model_validate_json(
+                output if isinstance(output, str) else json.dumps(output)
             )
 
-        return result
+        # Extract token counts from usage dict
+        usage = result_msg.usage or {}
+        tokens_in = usage.get("input_tokens", 0)
+        tokens_out = usage.get("output_tokens", 0)
+
+        return {
+            "response": validated,
+            "model": model,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "duration_ms": duration_ms,
+        }
