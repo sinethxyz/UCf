@@ -4,15 +4,24 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}",
+        "GITHUB_OWNER": "unicorn-protocol",
+        "GITHUB_REPOS": "unicorn-app,unicorn-foundry"
       }
     },
     "postgres_readonly": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-postgres"],
       "env": {
-        "DATABASE_URL": "${FOUNDRY_DB_READONLY_URL}"
+        "DATABASE_URL": "${UNICORN_APP_DB_READONLY_URL}"
       }
     }
+  },
+  "_profiles": {
+    "none": { "servers": [] },
+    "github_only": { "servers": ["github"] },
+    "github_postgres_readonly": { "servers": ["github", "postgres_readonly"] },
+    "research_full": { "servers": ["github", "postgres_readonly"] },
+    "app_build_minimal": { "servers": ["github"] }
   }
 }
