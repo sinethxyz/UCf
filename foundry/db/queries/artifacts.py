@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.db.models import RunArtifact
@@ -28,7 +29,16 @@ async def store_artifact(
     Returns:
         The newly created RunArtifact record.
     """
-    raise NotImplementedError("Phase 1")
+    artifact = RunArtifact(
+        run_id=run_id,
+        artifact_type=artifact_type,
+        storage_path=storage_path,
+        size_bytes=size_bytes,
+        checksum=checksum,
+    )
+    session.add(artifact)
+    await session.flush()
+    return artifact
 
 
 async def get_artifacts(session: AsyncSession, run_id: UUID) -> list[RunArtifact]:
@@ -41,7 +51,13 @@ async def get_artifacts(session: AsyncSession, run_id: UUID) -> list[RunArtifact
     Returns:
         List of RunArtifact records ordered by creation time.
     """
-    raise NotImplementedError("Phase 1")
+    stmt = (
+        select(RunArtifact)
+        .where(RunArtifact.run_id == run_id)
+        .order_by(RunArtifact.created_at.asc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
 
 
 async def get_artifact(session: AsyncSession, artifact_id: UUID) -> RunArtifact | None:
@@ -54,4 +70,4 @@ async def get_artifact(session: AsyncSession, artifact_id: UUID) -> RunArtifact 
     Returns:
         The RunArtifact if found, otherwise None.
     """
-    raise NotImplementedError("Phase 1")
+    return await session.get(RunArtifact, artifact_id)
