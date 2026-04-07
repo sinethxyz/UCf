@@ -376,13 +376,9 @@ class RunEngine:
         Returns:
             Absolute path to the created worktree directory.
         """
-        import re
+        from foundry.git.branch import generate_branch_name
 
-        # Generate deterministic branch name
-        slug = re.sub(r"[^a-z0-9]+", "-", task_request.title.lower().strip())
-        slug = slug.strip("-")[:40].rstrip("-")
-        task_type_slug = task_request.task_type.value.replace("_", "-")
-        branch_name = f"foundry/{task_type_slug}-{slug}"
+        branch_name = generate_branch_name(task_request.task_type, task_request.title)
 
         worktree_path = await self.worktree_manager.create(
             repo=task_request.repo,
