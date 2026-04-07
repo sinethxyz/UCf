@@ -174,11 +174,10 @@ class RunEngine:
             # 2. Create worktree (handles QUEUED → CREATING_WORKTREE → PLANNING)
             worktree_path = await self._create_worktree(run_id, task_request)
 
-            # 3. Run planning
-            try:
-                plan = await self._run_planning(run_id, task_request, worktree_path)
-            except Exception as e:
-                await self._transition(run_id, RunState.PLANNING, RunState.PLAN_FAILED, f"Planning failed: {e}")
+            # 3. Run planning (CREATING_WORKTREE → PLANNING, stores plan artifact)
+            plan = await self._run_planning(run_id, task_request, worktree_path)
+            if plan is None:
+                # _run_planning already transitioned to PLAN_FAILED and stored error_log
                 return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
 
             await self._transition(run_id, RunState.PLANNING, RunState.IMPLEMENTING, "Plan approved")
@@ -405,11 +404,6 @@ class RunEngine:
             run.branch_name = branch_name
             await self.session.flush()
 
-        # 5. Transition CREATING_WORKTREE → PLANNING
-        await self._transition(
-            run_id, RunState.CREATING_WORKTREE, RunState.PLANNING, "Worktree created",
-        )
-
         return worktree_path
 
     async def _run_planning(
@@ -417,8 +411,15 @@ class RunEngine:
         run_id: UUID,
         task_request: TaskRequest,
         worktree_path: str,
-    ) -> PlanArtifact:
+    ) -> PlanArtifact | None:
         """Run the planner subagent to produce a structured implementation plan.
+
+        Handles the full planning phase:
+        1. Transition to PLANNING state.
+        2. Call agent_runner.run_planner() with the task request.
+        3. Serialize plan to JSON, store via artifact_store as plan.json.
+        4. Register artifact metadata in the database.
+        5. On failure: transition to PLAN_FAILED and store error_log artifact.
 
         Args:
             run_id: ID of the current run.
@@ -426,15 +427,21 @@ class RunEngine:
             worktree_path: Path to the worktree for repo exploration.
 
         Returns:
-            PlanArtifact with ordered implementation steps.
+            PlanArtifact with ordered implementation steps, or None if
+            planning failed (run is transitioned to PLAN_FAILED).
         """
+        # Transition to PLANNING
+        await self._transition(
+            run_id, RunState.CREATING_WORKTREE, RunState.PLANNING, "Starting planning",
+        )
+
         try:
             plan = await self.agent_runner.run_planner(task_request, worktree_path)
 
-            # Store plan artifact
+            # Serialize plan to JSON, store as plan.json
             plan_json = plan.model_dump_json(indent=2)
             storage_path = await self.artifact_store.store(
-                run_id, ArtifactType.PLAN, plan_json,
+                run_id, ArtifactType.PLAN, plan_json, filename="plan.json",
             )
             await artifact_queries.store_artifact(
                 self.session, run_id, ArtifactType.PLAN.value,
@@ -444,16 +451,27 @@ class RunEngine:
 
             return plan
         except Exception as e:
-            # Store error log
+            logger.error("Planning failed for run %s: %s", run_id, e)
+
+            # Store error_log artifact
             error_data = json.dumps({"error": str(e), "phase": "planning"})
-            storage_path = await self.artifact_store.store(
-                run_id, ArtifactType.ERROR_LOG, error_data,
+            try:
+                storage_path = await self.artifact_store.store(
+                    run_id, ArtifactType.ERROR_LOG, error_data,
+                )
+                await artifact_queries.store_artifact(
+                    self.session, run_id, ArtifactType.ERROR_LOG.value,
+                    storage_path, len(error_data.encode()),
+                )
+            except Exception:
+                logger.exception("Failed to store error log for run %s", run_id)
+
+            # Transition to PLAN_FAILED
+            await self._transition(
+                run_id, RunState.PLANNING, RunState.PLAN_FAILED,
+                f"Planning failed: {e}",
             )
-            await artifact_queries.store_artifact(
-                self.session, run_id, ArtifactType.ERROR_LOG.value,
-                storage_path, len(error_data.encode()),
-            )
-            raise
+            return None
 
     async def _run_implementation(
         self,

@@ -7,11 +7,8 @@ and extractor subagents with appropriate tool access and system prompts.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from pathlib import Path
 from typing import Any, Literal
-from uuid import UUID
 
 from foundry.contracts.review_models import ReviewVerdict
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
@@ -23,137 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions for Anthropic tool_use
+# Tool configurations for each subagent role.
+# Tools are specified as string names matching the Agent SDK's built-in tools.
+# The working_directory parameter scopes file operations at runtime.
 # ---------------------------------------------------------------------------
 
-READ_TOOL = {
-    "name": "read_file",
-    "description": "Read the contents of a file at the given path.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Absolute path to the file to read."},
-        },
-        "required": ["path"],
-    },
-}
-
-WRITE_TOOL = {
-    "name": "write_file",
-    "description": "Write content to a file, creating it if it doesn't exist.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Absolute path to the file."},
-            "content": {"type": "string", "description": "Full file content to write."},
-        },
-        "required": ["path", "content"],
-    },
-}
-
-BASH_TOOL = {
-    "name": "bash",
-    "description": "Execute a bash command and return stdout/stderr.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "command": {"type": "string", "description": "The bash command to execute."},
-        },
-        "required": ["command"],
-    },
-}
-
-LIST_DIR_TOOL = {
-    "name": "list_directory",
-    "description": "List files in a directory.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "Absolute path to the directory."},
-        },
-        "required": ["path"],
-    },
-}
-
-SEARCH_TOOL = {
-    "name": "search_files",
-    "description": "Search for a pattern in files using grep-like search.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "pattern": {"type": "string", "description": "Regex pattern to search for."},
-            "path": {"type": "string", "description": "Directory to search in."},
-            "glob": {"type": "string", "description": "File glob pattern (e.g. '*.go')."},
-        },
-        "required": ["pattern", "path"],
-    },
-}
-
-PLANNER_TOOLS = [READ_TOOL, LIST_DIR_TOOL, SEARCH_TOOL]
-IMPLEMENTER_TOOLS = [READ_TOOL, WRITE_TOOL, BASH_TOOL, LIST_DIR_TOOL, SEARCH_TOOL]
-REVIEWER_TOOLS: list[dict] = []  # Reviewer has no tools — judges diff only
-
-
-async def _handle_tool(
-    tool_name: str,
-    tool_input: dict[str, Any],
-    worktree_path: str | None = None,
-) -> str:
-    """Execute a tool call from the agent, scoped to the worktree."""
-
-    if tool_name == "read_file":
-        path = tool_input["path"]
-        try:
-            return Path(path).read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            return f"Error: File not found: {path}"
-        except Exception as e:
-            return f"Error reading file: {e}"
-
-    elif tool_name == "write_file":
-        path = Path(tool_input["path"])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tool_input["content"], encoding="utf-8")
-        return f"Written {len(tool_input['content'])} bytes to {path}"
-
-    elif tool_name == "bash":
-        command = tool_input["command"]
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=worktree_path,
-        )
-        stdout, stderr = await proc.communicate()
-        output = stdout.decode(errors="replace")
-        if stderr:
-            output += "\nSTDERR:\n" + stderr.decode(errors="replace")
-        if proc.returncode != 0:
-            output = f"Exit code: {proc.returncode}\n{output}"
-        return output[:50000]  # Cap output size
-
-    elif tool_name == "list_directory":
-        path = Path(tool_input["path"])
-        if not path.is_dir():
-            return f"Error: Not a directory: {path}"
-        entries = sorted(path.iterdir())
-        return "\n".join(
-            f"{'d' if e.is_dir() else 'f'} {e.name}" for e in entries[:500]
-        )
-
-    elif tool_name == "search_files":
-        pattern = tool_input["pattern"]
-        search_path = tool_input["path"]
-        glob_pattern = tool_input.get("glob", "*")
-        proc = await asyncio.create_subprocess_exec(
-            "grep", "-rn", "--include", glob_pattern, pattern, search_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        return stdout.decode(errors="replace")[:50000]
-
-    return f"Unknown tool: {tool_name}"
+PLANNER_TOOLS: list[str] = ["Read", "Grep", "Glob"]
+IMPLEMENTER_TOOLS: list[str] = ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+REVIEWER_TOOLS: list[str] = []  # Reviewer has no tools — judges diff only
 
 
 class AgentRunner:
@@ -171,17 +45,21 @@ class AgentRunner:
         self,
         system_prompt: str,
         user_message: str,
-        tools: list[dict],
+        tools: list[str],
         model: str,
         output_schema: type | None = None,
         worktree_path: str | None = None,
     ) -> dict:
         """Execute a Claude subagent with the given configuration.
 
+        Delegates to the ClaudeAgentProvider. When output_schema is provided,
+        uses run_with_structured_output for validated JSON responses.
+        Otherwise uses run for free-form text/JSON responses.
+
         Args:
             system_prompt: The system prompt defining the agent's role.
             user_message: The task-specific user message.
-            tools: List of Anthropic tool definitions.
+            tools: List of tool name strings (e.g. ["Read", "Grep", "Glob"]).
             model: Model identifier (e.g. "claude-opus-4-6").
             output_schema: Optional Pydantic model class for structured output
                 validation. If provided, the agent's response is validated
@@ -189,24 +67,25 @@ class AgentRunner:
             worktree_path: Optional worktree path for tool execution scoping.
 
         Returns:
-            Parsed structured output from the agent as a dict.
+            Agent result dict with response and metadata.
         """
-        async def handler(name: str, inp: dict) -> str:
-            return await _handle_tool(name, inp, worktree_path)
+        if output_schema is not None:
+            return await self.provider.run_with_structured_output(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                model=model,
+                output_schema=output_schema,
+                tools=tools if tools else None,
+                working_directory=worktree_path,
+            )
 
-        result = await self.provider.run(
+        return await self.provider.run(
             system_prompt=system_prompt,
             user_message=user_message,
-            tools=tools if tools else None,
             model=model,
-            tool_handler=handler if tools else None,
+            tools=tools if tools else None,
+            working_directory=worktree_path,
         )
-
-        if output_schema is not None and isinstance(result.get("response"), dict):
-            # Validate against Pydantic model
-            output_schema.model_validate(result["response"])
-
-        return result
 
     async def run_planner(
         self,
@@ -215,8 +94,9 @@ class AgentRunner:
     ) -> PlanArtifact:
         """Run the planner subagent to produce a structured implementation plan.
 
-        The planner has read-only access to the worktree and produces a
-        PlanArtifact with ordered steps, risks, and open questions.
+        The planner has read-only access (Read, Grep, Glob) scoped to the
+        worktree and produces a PlanArtifact with ordered steps, risks, and
+        open questions.
 
         Args:
             task_request: The task to plan for.
@@ -243,7 +123,10 @@ class AgentRunner:
             worktree_path=worktree_path,
         )
 
-        return PlanArtifact.model_validate(result["response"])
+        response = result["response"]
+        if isinstance(response, PlanArtifact):
+            return response
+        return PlanArtifact.model_validate(response)
 
     async def run_implementer(
         self,
@@ -297,7 +180,7 @@ class AgentRunner:
         stdout, stderr = await proc.communicate()
         diff = stdout.decode(errors="replace")
 
-        # Also include untracked files
+        # Also include staged changes
         proc2 = await asyncio.create_subprocess_exec(
             "git", "diff", "--cached",
             cwd=worktree_path,
