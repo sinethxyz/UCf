@@ -1,15 +1,23 @@
-"""Eval runner: loads datasets, runs inference, scores results."""
+"""Eval runner: loads datasets, runs inference, scores results, aggregates metrics."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from foundry.contracts.eval_models import EvalDefinition, EvalResult
 
 
-async def run_eval(dataset_path: str, scorer_name: str, model: str) -> dict:
-    """Execute an evaluation run.
+class EvalRunner:
+    """Loads dataset, runs inference, scores, aggregates metrics."""
 
-    Args:
-        dataset_path: Path to JSONL dataset file.
-        scorer_name: Name of the scorer to use.
-        model: Model identifier for inference.
+    async def run(self, definition: EvalDefinition) -> EvalResult:
+        """Execute an evaluation run.
 
-    Returns:
-        Aggregate eval results dict.
-    """
-    raise NotImplementedError
+        Args:
+            definition: Eval definition specifying dataset, scorer, and model.
+
+        Returns:
+            Aggregated eval results.
+        """
+        raise NotImplementedError("Phase 1")
