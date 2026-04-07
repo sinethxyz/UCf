@@ -6,9 +6,19 @@ Runs the full Go verification suite in sequence against a worktree.
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StepResult:
+    """Result of a single verification step within a check."""
+
+    step_name: str
+    passed: bool
+    output: str
+    duration_ms: int
 
 
 @dataclass
@@ -19,6 +29,7 @@ class VerificationResult:
     passed: bool
     output: str
     duration_ms: int
+    details: list[StepResult] = field(default_factory=list)
 
 
 class GoVerifier:
@@ -40,7 +51,8 @@ class GoVerifier:
                 to './...' (all packages).
 
         Returns:
-            VerificationResult with aggregated check outcome.
+            VerificationResult with aggregated check outcome and per-step
+            details in the ``details`` field.
         """
         pkg_target = packages or ["./..."]
         checks = [
@@ -49,7 +61,8 @@ class GoVerifier:
             ("go_test", ["go", "test", "-count=1", "-timeout=120s"] + pkg_target),
         ]
 
-        all_output = []
+        all_output: list[str] = []
+        step_details: list[StepResult] = []
         total_start = time.monotonic()
 
         for check_name, cmd in checks:
@@ -69,9 +82,17 @@ class GoVerifier:
             if stderr:
                 output += "\n" + stderr.decode(errors="replace")
 
+            step_passed = proc.returncode == 0
+            step_details.append(StepResult(
+                step_name=check_name,
+                passed=step_passed,
+                output=output,
+                duration_ms=elapsed,
+            ))
+
             all_output.append(f"=== {check_name} ({elapsed}ms) ===\n{output}")
 
-            if proc.returncode != 0:
+            if not step_passed:
                 logger.warning("%s failed (exit %d)", check_name, proc.returncode)
                 total_ms = int((time.monotonic() - total_start) * 1000)
                 return VerificationResult(
@@ -79,6 +100,7 @@ class GoVerifier:
                     passed=False,
                     output="\n\n".join(all_output),
                     duration_ms=total_ms,
+                    details=step_details,
                 )
 
             logger.info("%s passed (%dms)", check_name, elapsed)
@@ -89,4 +111,5 @@ class GoVerifier:
             passed=True,
             output="\n\n".join(all_output),
             duration_ms=total_ms,
+            details=step_details,
         )
