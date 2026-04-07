@@ -17,9 +17,14 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from foundry.contracts.review_models import ReviewVerdict
+from foundry.contracts.review_models import ReviewIssue, ReviewVerdict
 from foundry.contracts.run_models import RunResponse
-from foundry.contracts.shared import RunState
+from foundry.contracts.shared import (
+    ReviewSeverity,
+    ReviewVerdictType,
+    RunState,
+    TaskType,
+)
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.db.models import RunEvent as RunEventORM
 from foundry.db.queries import artifacts as artifact_queries
@@ -154,7 +159,6 @@ class RunEngine:
         Returns:
             RunResponse with final state and metadata.
         """
-        from foundry.contracts.shared import ReviewVerdictType
         from foundry.contracts.run_models import RunResponse
 
         # 1. Create run record in QUEUED state
@@ -196,17 +200,10 @@ class RunEngine:
             await self._transition(run_id, RunState.VERIFYING, RunState.VERIFICATION_PASSED, "All checks passed")
 
             # 6. Run review (blind — reviewer does not see the plan)
-            await self._transition(run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING, "Starting review")
             review = await self._run_review(run_id, diff, task_request)
 
-            # Check migration guard if needed
-            guard_verdict = await self._check_migration_guard(run_id, diff)
-            if guard_verdict and guard_verdict.verdict == ReviewVerdictType.REJECT:
-                await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, "Migration guard rejected")
-                return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
-
             if review.verdict == ReviewVerdictType.REJECT:
-                await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, f"Review rejected: {review.summary}")
+                # _run_review already transitioned to REVIEW_FAILED
                 return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
 
             # 7. Open PR
@@ -659,6 +656,14 @@ class RunEngine:
         The reviewer does NOT see the plan — it judges the diff on its own
         merits to prevent confirmation bias.
 
+        Handles the full review phase:
+        1. Transition to REVIEWING state.
+        2. Generate PR title/description from task request (not from plan).
+        3. Run migration guard — if it rejects, transition to REVIEW_FAILED.
+        4. Call agent_runner.run_reviewer() with diff, title, description.
+        5. Store review.json artifact.
+        6. If verdict is REJECT: transition to REVIEW_FAILED.
+
         Args:
             run_id: ID of the current run.
             diff: The git diff to review.
@@ -667,17 +672,32 @@ class RunEngine:
         Returns:
             ReviewVerdict with verdict, issues, and summary.
         """
-        from foundry.contracts.shared import ReviewVerdictType
+        # Transition to REVIEWING
+        await self._transition(
+            run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING, "Starting review",
+        )
 
-        # Generate PR title/description for the reviewer
-        task_type_slug = task_request.task_type.value.replace("_", " ")
-        pr_title = f"[Foundry] {task_type_slug}: {task_request.title}"
+        # Generate PR title/description for the reviewer (blind — no plan)
+        pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
         pr_description = task_request.prompt[:500]
 
+        # Check migration guard first
+        guard_verdict = await self._check_migration_guard(
+            run_id, diff, task_request.task_type,
+        )
+        if guard_verdict and guard_verdict.verdict == ReviewVerdictType.REJECT:
+            await self._transition(
+                run_id, RunState.REVIEWING, RunState.REVIEW_FAILED,
+                f"Migration guard rejected: {guard_verdict.summary}",
+            )
+            return guard_verdict
+
+        # Run blind review
         review = await self.agent_runner.run_reviewer(
             diff=diff,
             pr_title=pr_title,
             pr_description=pr_description,
+            task_type=task_request.task_type,
         )
 
         # Store review artifact
@@ -691,35 +711,47 @@ class RunEngine:
             self.artifact_store.get_checksum(review_json),
         )
 
+        # If verdict is REJECT, transition to REVIEW_FAILED
+        if review.verdict == ReviewVerdictType.REJECT:
+            await self._transition(
+                run_id, RunState.REVIEWING, RunState.REVIEW_FAILED,
+                f"Review rejected: {review.summary}",
+            )
+
         return review
 
     async def _check_migration_guard(
         self,
         run_id: UUID,
         diff: str,
+        task_type: TaskType,
     ) -> ReviewVerdict | None:
         """Check if the diff touches protected paths and run migration guard.
 
         Automatically invoked if any changed file matches: migrations/, auth/,
-        infra/, *.env*, docker-compose*, Dockerfile*.
+        infra/, Dockerfile*, docker-compose*.
+
+        If the diff touches protected paths and the task type is bug_fix,
+        returns a reject verdict immediately — bug fixes should not touch
+        protected paths.
 
         Args:
             run_id: ID of the current run.
             diff: The git diff to check.
+            task_type: The task type for authorization checking.
 
         Returns:
             ReviewVerdict if migration guard was triggered, None otherwise.
         """
         import re
-        from foundry.contracts.shared import ReviewVerdictType
 
         # Check if diff touches protected paths
         protected_patterns = [
-            r"^[ab]/migrations/",
-            r"^[ab]/auth/",
-            r"^[ab]/infra/",
-            r"^[ab]/.*Dockerfile",
-            r"^[ab]/.*docker-compose",
+            r"[ab]/migrations/",
+            r"[ab]/auth/",
+            r"[ab]/infra/",
+            r"[ab]/.*Dockerfile",
+            r"[ab]/.*docker-compose",
         ]
         touches_protected = any(
             re.search(pattern, line, re.MULTILINE)
@@ -730,6 +762,31 @@ class RunEngine:
 
         if not touches_protected:
             return None
+
+        # Bug fixes must not touch protected paths — reject immediately
+        if task_type == TaskType.BUG_FIX:
+            logger.warning(
+                "Run %s: bug_fix task touches protected paths — rejecting",
+                run_id,
+            )
+            return ReviewVerdict(
+                verdict=ReviewVerdictType.REJECT,
+                issues=[
+                    ReviewIssue(
+                        severity=ReviewSeverity.CRITICAL,
+                        file_path="(protected path)",
+                        description=(
+                            "Bug fix tasks are not authorized to modify protected paths "
+                            "(migrations/, auth/, infra/, Docker configs). "
+                            "Use migration_plan or canon_update task type instead."
+                        ),
+                    ),
+                ],
+                summary=(
+                    "Bug fix task attempted to modify protected paths. "
+                    "Use migration_plan or canon_update task type instead."
+                ),
+            )
 
         logger.warning("Run %s touches protected paths — invoking migration guard", run_id)
         guard_verdict = await self.agent_runner.run_migration_guard(diff)

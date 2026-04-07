@@ -11,6 +11,7 @@ import logging
 from typing import Any, Literal
 
 from foundry.contracts.review_models import ReviewVerdict
+from foundry.contracts.shared import TaskType
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.orchestration import prompt_templates
 from foundry.orchestration.model_router import resolve_model
@@ -208,20 +209,23 @@ class AgentRunner:
         diff: str,
         pr_title: str,
         pr_description: str,
+        task_type: TaskType | str = TaskType.REVIEW_DIFF,
     ) -> ReviewVerdict:
         """Run the reviewer subagent to independently review a diff.
 
-        The reviewer does NOT receive the plan — it judges the diff on its
-        own merits to prevent confirmation bias.
+        CRITICAL: The reviewer does NOT receive the plan — it judges the diff
+        on its own merits to prevent confirmation bias. This is a blind review.
 
         Args:
             diff: The git diff to review.
             pr_title: Title of the proposed PR.
             pr_description: Description of the proposed PR.
+            task_type: Task type for model routing (defaults to review_diff).
 
         Returns:
             ReviewVerdict with verdict, issues list, and summary.
         """
+        model = resolve_model(task_type, "reviewer")
         user_msg = prompt_templates.build_reviewer_user_message(
             pr_title=pr_title,
             pr_description=pr_description,
@@ -232,10 +236,14 @@ class AgentRunner:
             system_prompt=prompt_templates.REVIEWER_SYSTEM,
             user_message=user_msg,
             tools=REVIEWER_TOOLS,
-            model="claude-opus-4-6",
+            model=model,
+            output_schema=ReviewVerdict,
         )
 
-        return ReviewVerdict.model_validate(result["response"])
+        response = result["response"]
+        if isinstance(response, ReviewVerdict):
+            return response
+        return ReviewVerdict.model_validate(response)
 
     async def run_migration_guard(
         self,
