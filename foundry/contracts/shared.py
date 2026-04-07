@@ -89,4 +89,4 @@ class EvidenceStrength(str, Enum):
 class FoundryBaseModel(BaseModel):
     """Base model with shared configuration for all Foundry models."""
 
-    model_config = {"from_attributes": True, "strict": True}
+    model_config = {"from_attributes": True}

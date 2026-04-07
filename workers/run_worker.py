@@ -71,7 +71,10 @@ class RunWorker:
         # Extract internal metadata before validation
         run_id = task_data.pop("_run_id", None)
 
-        task_request = TaskRequest.model_validate(task_data)
+        # Use model_validate_json for correct coercion of enum fields
+        # (FoundryBaseModel uses strict=True which rejects plain strings
+        # when validating from a dict).
+        task_request = TaskRequest.model_validate_json(json.dumps(task_data))
         logger.info(
             "Processing task: %s — %s (run_id=%s)",
             task_request.task_type,
