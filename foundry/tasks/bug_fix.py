@@ -3,11 +3,30 @@
 Diagnoses and fixes a reported bug with a mandatory regression test.
 """
 
+from __future__ import annotations
+
+import re
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from foundry.contracts.shared import MCPProfile, TaskType
 from foundry.contracts.task_types import TaskRequest
 from foundry.tasks import TaskExecutor, register_task
+
+if TYPE_CHECKING:
+    from foundry.orchestration.run_engine import RunEngine
+
+
+def _extract_files_from_diff(diff: str) -> list[str]:
+    """Extract unique file paths from a unified diff.
+
+    Parses ``diff --git a/path b/path`` headers to collect the set of
+    files modified. Returns a sorted, deduplicated list.
+    """
+    files: set[str] = set()
+    for match in re.finditer(r"^diff --git a/(.+?) b/(.+?)$", diff, re.MULTILINE):
+        files.add(match.group(2))
+    return sorted(files)
 
 
 @register_task(TaskType.BUG_FIX)
@@ -33,22 +52,42 @@ class BugFixTask(TaskExecutor):
     requires_review = True
 
     async def execute(
-        self, run_id: UUID, task_request: TaskRequest, worktree_path: str
+        self,
+        run_engine: RunEngine,
+        run_id: UUID,
+        task_request: TaskRequest,
+        worktree_path: str,
     ) -> dict:
         """Execute a bug fix task.
 
-        This is a thin wrapper — the RunEngine owns the lifecycle orchestration.
-        The task executor provides task-specific configuration and prompts.
+        Thin wrapper that delegates to run_engine lifecycle phases:
+        1. Planning — produces a PlanArtifact via the planner subagent.
+        2. Implementation — executes the plan via the implementer subagent.
+
+        Verification, review, and PR creation are handled by the run_engine
+        after this method returns.
 
         Returns:
-            Dict with task-specific results.
+            Dict with keys: diff, plan, files_changed.
         """
+        # 1. Planning phase (handles CREATING_WORKTREE -> PLANNING transition)
+        plan = await run_engine._run_planning(run_id, task_request, worktree_path)
+        if plan is None:
+            return {"diff": "", "plan": None, "files_changed": []}
+
+        # 2. Implementation phase (handles PLANNING -> IMPLEMENTING -> VERIFYING)
+        diff = await run_engine._run_implementation(
+            run_id, plan, task_request, worktree_path,
+        )
+        if diff is None:
+            return {"diff": "", "plan": plan.model_dump(), "files_changed": []}
+
+        files_changed = _extract_files_from_diff(diff)
+
         return {
-            "task_type": "bug_fix",
-            "run_id": str(run_id),
-            "requires_verification": self.requires_verification,
-            "requires_review": self.requires_review,
-            "language": "go",
+            "diff": diff,
+            "plan": plan.model_dump(),
+            "files_changed": files_changed,
         }
 
     async def get_plan_prompt(self, task_request: TaskRequest) -> str:

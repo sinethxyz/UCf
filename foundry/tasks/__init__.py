@@ -4,11 +4,17 @@ Each task type is a class that orchestrates a specific kind of Foundry run
 using the orchestration engine, providers, and verification modules.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from foundry.contracts.shared import MCPProfile, TaskType
 from foundry.contracts.task_types import TaskRequest
+
+if TYPE_CHECKING:
+    from foundry.orchestration.run_engine import RunEngine
 
 
 class TaskExecutor(ABC):
@@ -29,17 +35,26 @@ class TaskExecutor(ABC):
 
     @abstractmethod
     async def execute(
-        self, run_id: UUID, task_request: TaskRequest, worktree_path: str
+        self,
+        run_engine: RunEngine,
+        run_id: UUID,
+        task_request: TaskRequest,
+        worktree_path: str,
     ) -> dict:
-        """Execute the task within the given worktree.
+        """Execute the task by delegating to the run engine's lifecycle phases.
+
+        This is the entry point for task-specific orchestration. Each task
+        executor controls which lifecycle phases to invoke and how to
+        combine their results.
 
         Args:
+            run_engine: The RunEngine instance providing lifecycle phase methods.
             run_id: Unique identifier for this run.
             task_request: Validated task request with prompt, scope, etc.
             worktree_path: Filesystem path to the isolated git worktree.
 
         Returns:
-            Dict containing task results and artifact references.
+            Dict containing task results (diff, plan, files_changed, etc.).
         """
         ...
 

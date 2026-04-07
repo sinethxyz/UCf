@@ -4,11 +4,17 @@ Builds a new API endpoint in unicorn-app following existing domain patterns.
 Uses the planner, backend-implementer, and reviewer subagents.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from foundry.contracts.shared import MCPProfile, TaskType
 from foundry.contracts.task_types import TaskRequest
 from foundry.tasks import TaskExecutor, register_task
+
+if TYPE_CHECKING:
+    from foundry.orchestration.run_engine import RunEngine
 
 
 @register_task(TaskType.ENDPOINT_BUILD)
@@ -33,7 +39,11 @@ class EndpointBuildTask(TaskExecutor):
     requires_review = True
 
     async def execute(
-        self, run_id: UUID, task_request: TaskRequest, worktree_path: str
+        self,
+        run_engine: RunEngine,
+        run_id: UUID,
+        task_request: TaskRequest,
+        worktree_path: str,
     ) -> dict:
         """Execute an endpoint build task.
 

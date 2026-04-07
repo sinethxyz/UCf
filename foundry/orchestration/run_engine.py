@@ -180,17 +180,13 @@ class RunEngine:
                 # _run_planning already transitioned to PLAN_FAILED and stored error_log
                 return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
 
-            await self._transition(run_id, RunState.PLANNING, RunState.IMPLEMENTING, "Plan approved")
-
-            # 4. Run implementation
-            try:
-                diff = await self._run_implementation(run_id, plan, task_request, worktree_path)
-            except Exception as e:
-                await self._transition(run_id, RunState.IMPLEMENTING, RunState.ERRORED, f"Implementation failed: {e}")
+            # 4. Run implementation (handles PLANNING -> IMPLEMENTING -> VERIFYING transitions)
+            diff = await self._run_implementation(run_id, plan, task_request, worktree_path)
+            if diff is None:
+                # _run_implementation already transitioned to ERRORED and stored error_log
                 return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
 
-            # 5. Run verification (if required)
-            await self._transition(run_id, RunState.IMPLEMENTING, RunState.VERIFYING, "Starting verification")
+            # 5. Run verification (already in VERIFYING state)
             verification_passed = await self._run_verification(run_id, worktree_path, task_request)
 
             if not verification_passed:
@@ -479,11 +475,17 @@ class RunEngine:
         plan: PlanArtifact,
         task_request: TaskRequest,
         worktree_path: str,
-    ) -> str:
+    ) -> str | None:
         """Run the implementer subagent to execute the plan.
 
-        Selects the appropriate implementer (Go or TypeScript) based on
-        the task request's target paths and language context.
+        Handles the full implementation phase:
+        1. Transition to IMPLEMENTING state.
+        2. Set environment variables for hooks (RUN_ID, RUN_STATE, etc.).
+        3. Call agent_runner.run_implementer() with the plan.
+        4. Clean up environment variables after execution.
+        5. Store diff as artifact (diff.patch).
+        6. On failure: store error_log artifact, transition to ERRORED.
+        7. On success: transition to VERIFYING, return diff.
 
         Args:
             run_id: ID of the current run.
@@ -492,8 +494,14 @@ class RunEngine:
             worktree_path: Path to the worktree where edits are made.
 
         Returns:
-            The git diff of all changes made.
+            The git diff of all changes made, or None if implementation failed
+            (run is transitioned to ERRORED).
         """
+        # Transition to IMPLEMENTING
+        await self._transition(
+            run_id, RunState.PLANNING, RunState.IMPLEMENTING, "Starting implementation",
+        )
+
         # Set environment variables for hooks
         env_vars = {
             "RUN_ID": str(run_id),
@@ -502,7 +510,7 @@ class RunEngine:
             "ARTIFACT_DIR": str(self.artifact_store.base_path / "runs" / str(run_id)),
             "WORKTREE_PATH": worktree_path,
         }
-        old_env = {}
+        old_env: dict[str, str | None] = {}
         for key, value in env_vars.items():
             old_env[key] = os.environ.get(key)
             os.environ[key] = value
@@ -529,7 +537,37 @@ class RunEngine:
                     self.artifact_store.get_checksum(diff),
                 )
 
+            # Transition to VERIFYING
+            await self._transition(
+                run_id, RunState.IMPLEMENTING, RunState.VERIFYING,
+                "Implementation complete, starting verification",
+            )
+
             return diff
+
+        except Exception as e:
+            logger.error("Implementation failed for run %s: %s", run_id, e)
+
+            # Store error_log artifact
+            error_data = json.dumps({"error": str(e), "phase": "implementation"})
+            try:
+                storage_path = await self.artifact_store.store(
+                    run_id, ArtifactType.ERROR_LOG, error_data,
+                )
+                await artifact_queries.store_artifact(
+                    self.session, run_id, ArtifactType.ERROR_LOG.value,
+                    storage_path, len(error_data.encode()),
+                )
+            except Exception:
+                logger.exception("Failed to store error log for run %s", run_id)
+
+            # Transition to ERRORED
+            await self._transition(
+                run_id, RunState.IMPLEMENTING, RunState.ERRORED,
+                f"Implementation failed: {e}",
+            )
+            return None
+
         finally:
             # Restore original environment
             for key, original in old_env.items():

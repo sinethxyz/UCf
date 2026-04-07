@@ -5,11 +5,17 @@ using the Message Batches API. Does not use the Agent SDK.
 Validates all output against canon JSON schemas.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from foundry.contracts.shared import MCPProfile, TaskType
 from foundry.contracts.task_types import TaskRequest
 from foundry.tasks import TaskExecutor, register_task
+
+if TYPE_CHECKING:
+    from foundry.orchestration.run_engine import RunEngine
 
 
 @register_task(TaskType.EXTRACTION_BATCH)
@@ -37,7 +43,11 @@ class ExtractionBatchTask(TaskExecutor):
     requires_review = False
 
     async def execute(
-        self, run_id: UUID, task_request: TaskRequest, worktree_path: str
+        self,
+        run_engine: RunEngine,
+        run_id: UUID,
+        task_request: TaskRequest,
+        worktree_path: str,
     ) -> dict:
         """Execute a batch extraction task.
 
