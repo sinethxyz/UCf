@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,33 @@ if TYPE_CHECKING:
     from foundry.verification.runner import VerificationRunner
 
 logger = logging.getLogger(__name__)
+
+
+async def _build_run_response(session: AsyncSession, run_id: UUID) -> RunResponse:
+    """Build a RunResponse from the ORM Run object.
+
+    Handles coercion of string state to RunState enum and
+    metadata column to plain dict, which strict-mode Pydantic
+    does not do automatically via model_validate.
+    """
+    run = await run_queries.get_run(session, run_id)
+    if run is None:
+        raise ValueError(f"Run {run_id} not found")
+    return RunResponse(
+        id=run.id,
+        task_type=run.task_type,
+        repo=run.repo,
+        base_branch=run.base_branch,
+        title=run.title,
+        state=RunState(run.state),
+        branch_name=run.branch_name,
+        pr_url=run.pr_url,
+        error_message=run.error_message,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+        completed_at=run.completed_at,
+        metadata=dict(run.metadata_) if run.metadata_ else {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,9 +171,16 @@ class RunEngine:
     async def execute_run(self, task_request: TaskRequest) -> RunResponse:
         """Main entry point: execute a full run lifecycle for the given task.
 
-        Creates a run record, drives it through all phases (worktree creation,
-        planning, implementation, verification, review, PR creation), and
-        returns the final run response.
+        Orchestrates the complete run pipeline:
+        1. Create worktree for isolated execution.
+        2. Run planning to produce a structured implementation plan.
+        3. Run implementation to execute the plan.
+        4. Run verification (build, test, lint, schema).
+        5. Run review (blind — reviewer does not see the plan).
+        6. If review passed, open a PR with all collected artifacts.
+
+        On unexpected error: transitions to ERRORED, stores error artifact,
+        logs traceback. Always cleans up the worktree in a finally block.
 
         Args:
             task_request: The validated task request to execute.
@@ -154,12 +188,14 @@ class RunEngine:
         Returns:
             RunResponse with final state and metadata.
         """
+        import traceback
+
         from foundry.contracts.shared import ReviewVerdictType
-        from foundry.contracts.run_models import RunResponse
 
         # 1. Create run record in QUEUED state
         run = await run_queries.create_run(self.session, task_request)
         run_id = run.id
+        worktree_path: str | None = None
         logger.info("Created run %s for task: %s", run_id, task_request.title)
 
         # Add initial event
@@ -177,21 +213,19 @@ class RunEngine:
             # 3. Run planning (CREATING_WORKTREE → PLANNING, stores plan artifact)
             plan = await self._run_planning(run_id, task_request, worktree_path)
             if plan is None:
-                # _run_planning already transitioned to PLAN_FAILED and stored error_log
-                return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+                return await _build_run_response(self.session, run_id)
 
-            # 4. Run implementation (handles PLANNING -> IMPLEMENTING -> VERIFYING transitions)
+            # 4. Run implementation (PLANNING → IMPLEMENTING → VERIFYING)
             diff = await self._run_implementation(run_id, plan, task_request, worktree_path)
             if diff is None:
-                # _run_implementation already transitioned to ERRORED and stored error_log
-                return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+                return await _build_run_response(self.session, run_id)
 
             # 5. Run verification (already in VERIFYING state)
             verification_passed = await self._run_verification(run_id, worktree_path, task_request)
 
             if not verification_passed:
                 await self._transition(run_id, RunState.VERIFYING, RunState.VERIFICATION_FAILED, "Verification failed")
-                return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+                return await _build_run_response(self.session, run_id)
 
             await self._transition(run_id, RunState.VERIFYING, RunState.VERIFICATION_PASSED, "All checks passed")
 
@@ -203,25 +237,20 @@ class RunEngine:
             guard_verdict = await self._check_migration_guard(run_id, diff)
             if guard_verdict and guard_verdict.verdict == ReviewVerdictType.REJECT:
                 await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, "Migration guard rejected")
-                return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+                return await _build_run_response(self.session, run_id)
 
             if review.verdict == ReviewVerdictType.REJECT:
                 await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, f"Review rejected: {review.summary}")
-                return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+                return await _build_run_response(self.session, run_id)
 
-            # 7. Open PR
-            await self._transition(run_id, RunState.REVIEWING, RunState.PR_OPENED, "Opening PR")
-            pr_url = await self._open_pr(run_id, task_request, worktree_path, plan, review)
+            # 7. Open PR (handles REVIEWING → PR_OPENED → COMPLETED transitions)
+            await self._open_pr(run_id, task_request, worktree_path, plan, review, diff)
 
-            # 8. Complete
-            await self._transition(run_id, RunState.PR_OPENED, RunState.COMPLETED, f"PR opened: {pr_url}")
-
-            return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+            return await _build_run_response(self.session, run_id)
 
         except Exception as e:
-            logger.exception("Run %s failed unexpectedly", run_id)
+            logger.exception("Run %s failed unexpectedly: %s", run_id, traceback.format_exc())
             try:
-                # Try to transition to errored
                 run = await run_queries.get_run(self.session, run_id)
                 if run and run.state not in ("completed", "cancelled", "errored"):
                     current_state = RunState(run.state)
@@ -236,12 +265,24 @@ class RunEngine:
 
             # Store error artifact
             try:
-                error_data = json.dumps({"error": str(e), "phase": "execute_run"})
+                error_data = json.dumps({
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                    "phase": "execute_run",
+                })
                 await self.artifact_store.store(run_id, ArtifactType.ERROR_LOG, error_data)
             except Exception:
                 pass
 
-            return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+            return await _build_run_response(self.session, run_id)
+
+        finally:
+            # Always clean up the worktree
+            if worktree_path:
+                try:
+                    await self.worktree_manager.cleanup(worktree_path)
+                except Exception:
+                    logger.warning("Failed to clean up worktree at %s for run %s", worktree_path, run_id)
 
     async def cancel_run(self, run_id: UUID) -> RunResponse:
         """Cancel an in-progress run.
@@ -274,8 +315,7 @@ class RunEngine:
             except Exception:
                 logger.warning("Failed to clean up worktree for cancelled run %s", run_id)
 
-        from foundry.contracts.run_models import RunResponse
-        return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+        return await _build_run_response(self.session, run_id)
 
     async def retry_run(self, run_id: UUID) -> RunResponse:
         """Retry a failed run by transitioning it back to QUEUED.
@@ -306,8 +346,7 @@ class RunEngine:
 
         await self._transition(run_id, current_state, RunState.QUEUED, "Retrying run")
 
-        from foundry.contracts.run_models import RunResponse
-        return RunResponse.model_validate(await run_queries.get_run(self.session, run_id))
+        return await _build_run_response(self.session, run_id)
 
     # ------------------------------------------------------------------
     # State machine
@@ -715,14 +754,14 @@ class RunEngine:
 
         # Check if diff touches protected paths
         protected_patterns = [
-            r"^[ab]/migrations/",
-            r"^[ab]/auth/",
-            r"^[ab]/infra/",
-            r"^[ab]/.*Dockerfile",
-            r"^[ab]/.*docker-compose",
+            r"[ab]/migrations/",
+            r"[ab]/auth/",
+            r"[ab]/infra/",
+            r"[ab]/.*Dockerfile",
+            r"[ab]/.*docker-compose",
         ]
         touches_protected = any(
-            re.search(pattern, line, re.MULTILINE)
+            re.search(pattern, line)
             for pattern in protected_patterns
             for line in diff.split("\n")
             if line.startswith("diff --git") or line.startswith("---") or line.startswith("+++")
@@ -742,25 +781,38 @@ class RunEngine:
         worktree_path: str,
         plan: PlanArtifact,
         review: ReviewVerdict,
+        diff: str,
     ) -> str:
         """Open a pull request with the changes from the worktree.
 
-        Constructs the PR title, body (with plan, changes, verification,
-        review artifacts), and labels per PR standards.
+        Handles the full PR opening lifecycle:
+        1. Transition to PR_OPENED state.
+        2. Stage and commit all changes in the worktree.
+        3. Push the branch to the remote.
+        4. Delegate PR creation to pr_creator with all collected artifacts.
+        5. Store pr_metadata.json artifact with URL and number.
+        6. Update run record with pr_url.
+        7. Transition to COMPLETED state.
 
         Args:
             run_id: ID of the current run.
             task_request: Original task request.
-            worktree_path: Path to the worktree with committed changes.
+            worktree_path: Path to the worktree with changes.
             plan: The plan artifact for inclusion in PR body.
             review: The review verdict for inclusion in PR body.
+            diff: The git diff of all changes.
 
         Returns:
             URL of the opened pull request.
         """
         import asyncio
 
-        # Commit all changes in the worktree
+        # 1. Transition to PR_OPENED
+        await self._transition(
+            run_id, RunState.REVIEWING, RunState.PR_OPENED, "Opening PR",
+        )
+
+        # 2. Stage all changes
         proc = await asyncio.create_subprocess_exec(
             "git", "add", "-A",
             cwd=worktree_path,
@@ -769,6 +821,7 @@ class RunEngine:
         )
         await proc.communicate()
 
+        # 3. Commit
         commit_msg = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
         proc = await asyncio.create_subprocess_exec(
             "git", "commit", "-m", commit_msg,
@@ -778,7 +831,7 @@ class RunEngine:
         )
         await proc.communicate()
 
-        # Push branch
+        # 4. Push branch
         run = await run_queries.get_run(self.session, run_id)
         branch_name = run.branch_name if run else "unknown"
 
@@ -792,52 +845,34 @@ class RunEngine:
         if proc.returncode != 0:
             logger.warning("Git push stderr: %s", stderr.decode())
 
-        # Build PR title and body
-        task_type_display = task_request.task_type.value.replace("_", " ")
-        pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
+        # 5. Load verification results from stored artifact (if available)
+        verification_results: list[dict] = []
+        try:
+            artifact_paths = await self.artifact_store.list_artifacts(run_id)
+            for path in artifact_paths:
+                if "verification" in path:
+                    raw = await self.artifact_store.retrieve(path)
+                    verification_results = json.loads(raw)
+                    break
+        except Exception:
+            logger.debug("Could not load verification artifact for PR body")
 
-        review_summary = review.summary if review else "No review"
-        review_verdict = review.verdict.value if review else "N/A"
-
-        pr_body = f"""\
-## Summary
-{task_request.prompt[:500]}
-
-## Plan
-Complexity: {plan.estimated_complexity.value}
-Steps: {len(plan.steps)}
-Risks: {', '.join(plan.risks) if plan.risks else 'None identified'}
-
-## Changes
-{chr(10).join(f'- `{step.file_path}`: {step.action} — {step.rationale}' for step in plan.steps)}
-
-## Verification
-- [x] Verification completed
-
-## Review
-Verdict: {review_verdict}
-{review_summary}
-
-## Run Metadata
-- Run ID: {run_id}
-- Task Type: {task_request.task_type.value}
-"""
-
-        # Determine repo target
-        repo_slug = "sinethxyz/unicorn-app" if task_request.repo == "unicorn-app" else "sinethxyz/ucf"
-
+        # 6. Create PR via pr_creator with all collected artifacts
         pr_result = await self.pr_creator.create_pr(
-            repo=repo_slug,
-            branch=branch_name,
+            task_request=task_request,
+            plan=plan,
+            diff=diff,
+            verification_results=verification_results,
+            review_verdict=review,
+            run_id=run_id,
+            branch_name=branch_name,
             base_branch=task_request.base_branch,
-            title=pr_title,
-            body=pr_body,
-            labels=[task_request.task_type.value.replace("_", "-")],
         )
 
         pr_url = pr_result["url"]
 
-        # Store PR metadata artifact
+        # 7. Store PR metadata artifact
+        pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
         pr_metadata = json.dumps({
             "url": pr_url,
             "number": pr_result["number"],
@@ -849,13 +884,19 @@ Verdict: {review_verdict}
             run_id, ArtifactType.PR_METADATA, pr_metadata,
         )
         await artifact_queries.store_artifact(
-            self.session, run_id, "pr_metadata",
+            self.session, run_id, ArtifactType.PR_METADATA.value,
             storage_path, len(pr_metadata.encode()),
         )
 
-        # Update run with PR URL
+        # 8. Update run with PR URL
         if run:
             run.pr_url = pr_url
             await self.session.flush()
+
+        # 9. Transition to COMPLETED
+        await self._transition(
+            run_id, RunState.PR_OPENED, RunState.COMPLETED,
+            f"PR opened: {pr_url}",
+        )
 
         return pr_url
