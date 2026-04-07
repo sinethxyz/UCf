@@ -7,5 +7,5 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check() -> dict:
-    """Return service health status."""
-    return {"status": "ok", "service": "unicorn-foundry"}
+    """Return service health status and version."""
+    return {"status": "ok", "version": "0.1.0"}
