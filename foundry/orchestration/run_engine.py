@@ -231,19 +231,16 @@ class RunEngine:
             if plan is None:
                 return await _build_run_response(self.session, run_id)
 
-            # 4. Run implementation (PLANNING → IMPLEMENTING → VERIFYING)
+            # 4. Run implementation (PLANNING → IMPLEMENTING)
             diff = await self._run_implementation(run_id, plan, task_request, worktree_path)
             if diff is None:
                 return await _build_run_response(self.session, run_id)
 
-            # 5. Run verification (already in VERIFYING state)
+            # 5. Run verification (IMPLEMENTING → VERIFYING → PASSED/FAILED)
             verification_passed = await self._run_verification(run_id, worktree_path, task_request)
 
             if not verification_passed:
-                await self._transition(run_id, RunState.VERIFYING, RunState.VERIFICATION_FAILED, "Verification failed")
                 return await _build_run_response(self.session, run_id)
-
-            await self._transition(run_id, RunState.VERIFYING, RunState.VERIFICATION_PASSED, "All checks passed")
 
             # 6. Run review (blind — reviewer does not see the plan)
             await self._transition(run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING, "Starting review")
@@ -562,7 +559,7 @@ class RunEngine:
         4. Clean up environment variables after execution.
         5. Store diff as artifact (diff.patch).
         6. On failure: store error_log artifact, transition to ERRORED.
-        7. On success: transition to VERIFYING, return diff.
+        7. On success: return diff (verification handles the next transition).
 
         Args:
             run_id: ID of the current run.
@@ -614,12 +611,6 @@ class RunEngine:
                     self.artifact_store.get_checksum(diff),
                 )
 
-            # Transition to VERIFYING
-            await self._transition(
-                run_id, RunState.IMPLEMENTING, RunState.VERIFYING,
-                "Implementation complete, starting verification",
-            )
-
             return diff
 
         except Exception as e:
@@ -661,8 +652,16 @@ class RunEngine:
     ) -> bool:
         """Run deterministic verification (build, test, lint, schema).
 
-        Executes verification steps appropriate for the language and task type:
-        Go (build, vet, test), TypeScript (tsc, eslint), JSON Schema validation.
+        Manages the full verification lifecycle:
+        1. Transition IMPLEMENTING → VERIFYING.
+        2. Extract changed files from stored diff artifact.
+        3. Call verification_runner.run_all().
+        4. Serialize results to JSON and store as verification.json artifact.
+        5. Register artifact in DB with size and checksum.
+        6. Persist each VerificationResult as a verification_results DB row
+           (delegated to verification_runner when session is provided).
+        7. On failure: set error_message on run, transition to VERIFICATION_FAILED.
+        8. On success: transition to VERIFICATION_PASSED.
 
         Args:
             run_id: ID of the current run.
@@ -674,27 +673,54 @@ class RunEngine:
         """
         import asyncio
 
-        # Extract changed files from the worktree
-        proc = await asyncio.create_subprocess_exec(
-            "git", "diff", "--name-only", "HEAD",
-            cwd=worktree_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # 1. Transition to VERIFYING
+        await self._transition(
+            run_id, RunState.IMPLEMENTING, RunState.VERIFYING,
+            "Starting verification",
         )
-        stdout, _ = await proc.communicate()
-        changed_files = [f for f in stdout.decode().strip().split("\n") if f]
 
-        # Also check untracked files
-        proc2 = await asyncio.create_subprocess_exec(
-            "git", "status", "--porcelain",
-            cwd=worktree_path,
-            stdout=asyncio.subprocess.PIPE,
-        )
-        stdout2, _ = await proc2.communicate()
-        for line in stdout2.decode().strip().split("\n"):
-            if line.startswith("?? "):
-                changed_files.append(line[3:])
+        # 2. Extract changed files from stored diff artifact
+        changed_files: list[str] = []
+        try:
+            artifact_paths = await self.artifact_store.list_artifacts(run_id)
+            for path in artifact_paths:
+                if "diff" in path:
+                    raw = await self.artifact_store.retrieve(path)
+                    diff_text = raw.decode("utf-8", errors="replace")
+                    for line in diff_text.split("\n"):
+                        if line.startswith("diff --git"):
+                            parts = line.split(" b/", 1)
+                            if len(parts) == 2:
+                                changed_files.append(parts[1])
+                    break
+        except Exception:
+            logger.warning(
+                "Could not parse diff artifact for run %s, falling back to git",
+                run_id,
+            )
 
+        # Fallback to git if diff artifact was unavailable or empty
+        if not changed_files:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "diff", "--name-only", "HEAD",
+                cwd=worktree_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            changed_files = [f for f in stdout.decode().strip().split("\n") if f]
+
+            proc2 = await asyncio.create_subprocess_exec(
+                "git", "status", "--porcelain",
+                cwd=worktree_path,
+                stdout=asyncio.subprocess.PIPE,
+            )
+            stdout2, _ = await proc2.communicate()
+            for line in stdout2.decode().strip().split("\n"):
+                if line.startswith("?? "):
+                    changed_files.append(line[3:])
+
+        # 3. Run verification checks
         results, passed = await self.verification_runner.run_all(
             worktree_path,
             changed_files,
@@ -702,20 +728,55 @@ class RunEngine:
             session=self.session,
         )
 
-        # Store verification artifact
+        # 4. Serialize and store verification.json artifact
         verification_data = json.dumps(
-            [{"check_type": r.check_type, "passed": r.passed, "output": r.output[:5000], "duration_ms": r.duration_ms} for r in results],
+            [
+                {
+                    "check_type": r.check_type,
+                    "passed": r.passed,
+                    "output": r.output[:5000],
+                    "duration_ms": r.duration_ms,
+                }
+                for r in results
+            ],
             indent=2,
         )
         storage_path = await self.artifact_store.store(
             run_id, ArtifactType.VERIFICATION, verification_data,
+            filename="verification.json",
         )
+        checksum = self.artifact_store.get_checksum(verification_data)
         await artifact_queries.store_artifact(
             self.session, run_id, ArtifactType.VERIFICATION.value,
-            storage_path, len(verification_data.encode()),
+            storage_path, len(verification_data.encode()), checksum,
         )
 
-        return passed
+        # 5. Handle pass/fail with state transitions and run events
+        if not passed:
+            failed_checks = [r.check_type for r in results if not r.passed]
+            error_summary = (
+                f"Verification failed: {', '.join(failed_checks)} did not pass"
+            )
+
+            # Attach error summary to run row
+            run = await run_queries.get_run(self.session, run_id)
+            if run is not None:
+                run.error_message = error_summary
+                await self.session.flush()
+
+            # Transition to VERIFICATION_FAILED with descriptive message
+            await self._transition(
+                run_id, RunState.VERIFYING, RunState.VERIFICATION_FAILED,
+                error_summary,
+            )
+            return False
+
+        # All checks passed
+        await self._transition(
+            run_id, RunState.VERIFYING, RunState.VERIFICATION_PASSED,
+            "All verification checks passed",
+        )
+        return True
 
     async def _run_review(
         self,

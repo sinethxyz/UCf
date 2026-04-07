@@ -489,14 +489,14 @@ class TestRunImplementation:
         )
         return run_id
 
-    async def test_transitions_planning_to_implementing_to_verifying(
+    async def test_transitions_planning_to_implementing_and_returns_diff(
         self,
         async_session: AsyncSession,
         run_engine: RunEngine,
         sample_task_request: TaskRequest,
         sample_plan_artifact: PlanArtifact,
     ):
-        """On success: PLANNING -> IMPLEMENTING -> VERIFYING."""
+        """On success: PLANNING -> IMPLEMENTING, returns diff (verification handles next transition)."""
         run_id = await self._setup_run_in_planning_state(
             async_session, run_engine, sample_task_request,
         )
@@ -509,7 +509,7 @@ class TestRunImplementation:
         assert diff == SAMPLE_DIFF
         run = await get_run(async_session, run_id)
         assert run is not None
-        assert run.state == RunState.VERIFYING.value
+        assert run.state == RunState.IMPLEMENTING.value
 
     async def test_transitions_to_errored_on_failure(
         self,
@@ -689,9 +689,9 @@ class TestRunImplementation:
 
         events = await get_run_events(async_session, run_id)
         event_states = [e.state for e in events]
-        # Should have: creating_worktree, planning (from setup), implementing, verifying
+        # Should have: creating_worktree, planning (from setup), implementing
+        # (verifying transition is now handled by _run_verification)
         assert "implementing" in event_states
-        assert "verifying" in event_states
 
     async def test_empty_diff_does_not_store_artifact(
         self,
