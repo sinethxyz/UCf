@@ -80,10 +80,10 @@ async def _setup_run_in_implementing_state(
         await engine._transition(run_id, from_s, to_s, f"{from_s.value} -> {to_s.value}")
 
     # Store a diff artifact so _run_verification can extract changed files
-    storage_path = await artifact_store.store(run_id, ArtifactType.DIFF, SAMPLE_DIFF)
+    result = await artifact_store.store(run_id, ArtifactType.DIFF, SAMPLE_DIFF)
     await artifact_queries.store_artifact(
         session, run_id, ArtifactType.DIFF.value,
-        storage_path, len(SAMPLE_DIFF.encode()),
+        result["storage_path"], result["size_bytes"], result["checksum"],
     )
 
     return run_id
@@ -190,10 +190,11 @@ class TestVerificationPassPath:
         await engine._run_verification(run_id, "/tmp/worktree", sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        verification_artifacts = [a for a in artifacts if "verification" in a]
+        verification_artifacts = [a for a in artifacts if "verification" in a["filename"]]
         assert len(verification_artifacts) == 1
 
-        content = json.loads(await artifact_store.retrieve(verification_artifacts[0]))
+        storage_path = f"runs/{run_id}/{verification_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert len(content) == 3
         assert all(item["passed"] for item in content)
 
@@ -403,10 +404,11 @@ class TestVerificationArtifactOnFailure:
         await engine._run_verification(run_id, "/tmp/worktree", sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        verification_artifacts = [a for a in artifacts if "verification" in a]
+        verification_artifacts = [a for a in artifacts if "verification" in a["filename"]]
         assert len(verification_artifacts) == 1
 
-        content = json.loads(await artifact_store.retrieve(verification_artifacts[0]))
+        storage_path = f"runs/{run_id}/{verification_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert len(content) == 2  # go_build + go_test
         assert content[0]["passed"] is True   # go_build passed
         assert content[1]["passed"] is False  # go_test failed
@@ -445,8 +447,9 @@ class TestVerificationArtifactOnFailure:
         await engine._run_verification(run_id, "/tmp/worktree", sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        verification_artifacts = [a for a in artifacts if "verification" in a]
-        content = json.loads(await artifact_store.retrieve(verification_artifacts[0]))
+        verification_artifacts = [a for a in artifacts if "verification" in a["filename"]]
+        storage_path = f"runs/{run_id}/{verification_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
 
         failed_item = [c for c in content if not c["passed"]][0]
         assert failed_item["check_type"] == "go_test"

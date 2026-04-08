@@ -210,10 +210,11 @@ class TestExecuteRunHappyPath:
             response = await run_engine.execute_run(sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(response.id)
-        pr_artifacts = [a for a in artifacts if "pr_metadata" in a]
+        pr_artifacts = [a for a in artifacts if "pr_metadata" in a["filename"]]
         assert len(pr_artifacts) == 1
 
-        content = json.loads(await artifact_store.retrieve(pr_artifacts[0]))
+        storage_path = f"runs/{response.id}/{pr_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert content["url"] == "https://github.com/sinethxyz/unicorn-app/pull/99"
         assert content["number"] == 99
 
@@ -531,10 +532,11 @@ class TestExecuteRunErrorHandling:
         response = await run_engine.execute_run(sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(response.id)
-        error_artifacts = [a for a in artifacts if "error_log" in a]
+        error_artifacts = [a for a in artifacts if "error_log" in a["filename"]]
         assert len(error_artifacts) >= 1
 
-        content = json.loads(await artifact_store.retrieve(error_artifacts[0]))
+        storage_path = f"runs/{response.id}/{error_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert "Disk full" in content["error"]
         assert content["phase"] == "execute_run"
 
@@ -552,8 +554,9 @@ class TestExecuteRunErrorHandling:
         response = await run_engine.execute_run(sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(response.id)
-        error_artifacts = [a for a in artifacts if "error_log" in a]
-        content = json.loads(await artifact_store.retrieve(error_artifacts[0]))
+        error_artifacts = [a for a in artifacts if "error_log" in a["filename"]]
+        storage_path = f"runs/{response.id}/{error_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert "traceback" in content
         assert "Disk full" in content["traceback"]
 
@@ -700,10 +703,11 @@ class TestOpenPr:
             )
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        pr_artifacts = [a for a in artifacts if "pr_metadata" in a]
+        pr_artifacts = [a for a in artifacts if "pr_metadata" in a["filename"]]
         assert len(pr_artifacts) == 1
 
-        content = json.loads(await artifact_store.retrieve(pr_artifacts[0]))
+        storage_path = f"runs/{run_id}/{pr_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert content["number"] == 99
         assert "foundry/bug-fix-pagination" in content["branch"]
 
