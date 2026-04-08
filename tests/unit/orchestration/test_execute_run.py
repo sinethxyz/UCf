@@ -75,6 +75,7 @@ def sample_review() -> ReviewVerdict:
         verdict=ReviewVerdictType.APPROVE,
         issues=[],
         summary="Clean fix, approved.",
+        confidence=0.95,
     )
 
 
@@ -90,6 +91,7 @@ def rejected_review() -> ReviewVerdict:
             ),
         ],
         summary="Critical issues found.",
+        confidence=0.9,
     )
 
 
@@ -804,6 +806,7 @@ class TestMigrationGuard:
             verdict=ReviewVerdictType.REJECT,
             issues=[],
             summary="Unsafe migration",
+            confidence=0.85,
         ))
 
         with patch("asyncio.create_subprocess_exec", return_value=_make_git_mock()):

@@ -11,6 +11,7 @@ import logging
 from typing import Any, Literal
 
 from foundry.contracts.review_models import ReviewVerdict
+from foundry.contracts.shared import TaskType
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.orchestration import prompt_templates
 from foundry.orchestration.model_router import resolve_model
@@ -208,34 +209,49 @@ class AgentRunner:
         diff: str,
         pr_title: str,
         pr_description: str,
+        changed_files: list[str] | None = None,
     ) -> ReviewVerdict:
         """Run the reviewer subagent to independently review a diff.
 
-        The reviewer does NOT receive the plan — it judges the diff on its
-        own merits to prevent confirmation bias.
+        CRITICAL: The reviewer does NOT receive the PlanArtifact. It judges
+        the diff on its own merits to prevent confirmation bias. It sees
+        ONLY: the diff, the PR title, the PR description, and optionally
+        the list of changed files.
 
         Args:
             diff: The git diff to review.
             pr_title: Title of the proposed PR.
             pr_description: Description of the proposed PR.
+            changed_files: Optional list of changed file paths for context.
 
         Returns:
-            ReviewVerdict with verdict, issues list, and summary.
+            ReviewVerdict with verdict, issues list, summary, and confidence.
         """
+        model = resolve_model(TaskType.REVIEW_DIFF, "reviewer")
+
         user_msg = prompt_templates.build_reviewer_user_message(
             pr_title=pr_title,
             pr_description=pr_description,
             diff=diff,
         )
 
+        # Append changed file list for additional context (never the plan)
+        if changed_files:
+            files_str = "\n".join(f"- {f}" for f in changed_files)
+            user_msg += f"\n\nChanged files:\n{files_str}"
+
         result = await self.run_agent(
             system_prompt=prompt_templates.REVIEWER_SYSTEM,
             user_message=user_msg,
             tools=REVIEWER_TOOLS,
-            model="claude-opus-4-6",
+            model=model,
+            output_schema=ReviewVerdict,
         )
 
-        return ReviewVerdict.model_validate(result["response"])
+        response = result["response"]
+        if isinstance(response, ReviewVerdict):
+            return response
+        return ReviewVerdict.model_validate(response)
 
     async def run_migration_guard(
         self,
