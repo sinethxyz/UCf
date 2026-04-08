@@ -21,9 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import redis.asyncio as aioredis
 
-from foundry.contracts.review_models import ReviewVerdict
+from foundry.contracts.review_models import ReviewIssue, ReviewVerdict
 from foundry.contracts.run_models import RunResponse
-from foundry.contracts.shared import RunState
+from foundry.contracts.shared import (
+    ReviewSeverity,
+    ReviewVerdictType,
+    RunState,
+    TaskType,
+)
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.db.models import RunEvent as RunEventORM
 from foundry.db.queries import artifacts as artifact_queries
@@ -154,6 +159,62 @@ _RETRYABLE_STATES: set[RunState] = {
 
 QUEUE_KEY = "foundry:runs"
 
+# ---------------------------------------------------------------------------
+# Protected path patterns for migration guard.
+# Any changed file matching these triggers the migration guard subagent.
+# ---------------------------------------------------------------------------
+
+PROTECTED_PATH_PREFIXES: tuple[str, ...] = ("migrations/", "auth/", "infra/")
+PROTECTED_PATH_GLOBS: tuple[str, ...] = ("Dockerfile*", "docker-compose*")
+PROTECTED_PATH_KEYWORDS: tuple[str, ...] = ("secret", "credential", "token")
+
+# Task types allowed to modify protected paths (escalated to LLM review).
+# All other task types that touch protected paths are auto-rejected.
+MIGRATION_GUARD_ALLOWED_TASK_TYPES: set[TaskType] = {
+    TaskType.ENDPOINT_BUILD,
+    TaskType.REFACTOR,
+    TaskType.MIGRATION_PLAN,
+    TaskType.CANON_UPDATE,
+}
+
+
+def _match_protected_paths(changed_files: list[str]) -> list[str]:
+    """Return the subset of changed_files that match protected path patterns.
+
+    Matches against:
+    - Prefix: migrations/, auth/, infra/
+    - Glob: Dockerfile*, docker-compose*
+    - Keyword: *secret*, *credential*, *token* (case-insensitive)
+
+    Args:
+        changed_files: List of file paths from the diff.
+
+    Returns:
+        List of file paths that match at least one protected pattern.
+    """
+    import fnmatch
+
+    protected: list[str] = []
+    for f in changed_files:
+        # Check prefix matches (handle both "migrations/..." and "some/migrations/...")
+        if any(f.startswith(prefix) or f"/{prefix}" in f for prefix in PROTECTED_PATH_PREFIXES):
+            protected.append(f)
+            continue
+
+        # Check glob matches against the basename
+        basename = f.rsplit("/", 1)[-1] if "/" in f else f
+        if any(fnmatch.fnmatch(basename, g) for g in PROTECTED_PATH_GLOBS):
+            protected.append(f)
+            continue
+
+        # Check keyword matches (case-insensitive) against the full path
+        f_lower = f.lower()
+        if any(kw in f_lower for kw in PROTECTED_PATH_KEYWORDS):
+            protected.append(f)
+            continue
+
+    return protected
+
 
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a git diff."""
@@ -217,7 +278,6 @@ class RunEngine:
         Returns:
             RunResponse with final state and metadata.
         """
-        from foundry.contracts.shared import ReviewVerdictType
 
         # 1. Create run record in QUEUED state
         run = await run_queries.create_run(self.session, task_request)
@@ -259,19 +319,13 @@ class RunEngine:
             if not verification_passed:
                 return await _build_run_response(self.session, run_id)
 
-            # 6. Run review (blind — reviewer does not see the plan)
-            # _run_review handles VERIFICATION_PASSED → REVIEWING transition,
-            # artifact storage, run events, and REJECT → REVIEW_FAILED internally.
+            # 6. Run review (migration guard + blind review)
+            # _run_review handles: migration guard check → standard blind review.
+            # Transitions: VERIFICATION_PASSED → REVIEWING → REVIEW_FAILED (on reject).
             review = await self._run_review(run_id, diff, task_request)
 
             if review.verdict == ReviewVerdictType.REJECT:
                 # _run_review already transitioned to REVIEW_FAILED and set error_message
-                return await _build_run_response(self.session, run_id)
-
-            # Check migration guard if needed (only if review didn't reject)
-            guard_verdict = await self._check_migration_guard(run_id, diff)
-            if guard_verdict and guard_verdict.verdict == ReviewVerdictType.REJECT:
-                await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, "Migration guard rejected")
                 return await _build_run_response(self.session, run_id)
 
             # 7. Open PR (handles REVIEWING → PR_OPENED → COMPLETED transitions)
@@ -986,21 +1040,17 @@ class RunEngine:
         diff: str,
         task_request: TaskRequest,
     ) -> ReviewVerdict:
-        """Run the reviewer subagent to independently review the diff.
-
-        The reviewer does NOT see the plan — it judges the diff on its own
-        merits to prevent confirmation bias.
+        """Run review: migration guard (if needed) then standard blind review.
 
         Handles the full review lifecycle:
         1. Transition to REVIEWING state.
-        2. Generate PR title and description for reviewer context.
-        3. Extract changed files from the diff.
-        4. Call agent_runner.run_reviewer() with diff, title, description, changed_files.
-        5. Serialize ReviewVerdict to JSON and store as review.json artifact.
-        6. Register artifact in DB with size and checksum.
-        7. Add run event with review summary (verdict, issue count, confidence).
-        8. If REJECT: transition to REVIEW_FAILED, attach rejection summary to error_message.
-        9. If REQUEST_CHANGES: add event noting advisory changes will be in PR.
+        2. Extract changed files from the diff.
+        3. Run migration guard check BEFORE standard review.
+           - If guard REJECT: store artifact, transition to REVIEW_FAILED, return.
+           - If guard APPROVE/REQUEST_CHANGES: store artifact, continue.
+           - If guard None (no protected paths): skip.
+        4. Run standard blind review (reviewer does NOT see the plan).
+        5. Store review.json artifact and handle verdict.
 
         Args:
             run_id: ID of the current run.
@@ -1010,7 +1060,6 @@ class RunEngine:
         Returns:
             ReviewVerdict with verdict, issues, and summary.
         """
-        from foundry.contracts.shared import ReviewVerdictType
         from foundry.orchestration.model_router import resolve_model
 
         review_model = resolve_model(task_request.task_type, "reviewer", task_request.model_override)
@@ -1018,10 +1067,60 @@ class RunEngine:
         # 1. Transition to REVIEWING
         await self._transition(
             run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING,
-            "Starting blind review",
+            "Starting review phase",
         )
 
-        # Log review started
+        # 2. Extract changed files
+        changed_files = _extract_changed_files(diff)
+
+        # 3. Migration guard check — BEFORE standard blind review
+        guard_verdict = await self._check_migration_guard(
+            run_id, diff, changed_files, task_request,
+        )
+
+        if guard_verdict is not None:
+            # Store migration_guard_review.json artifact
+            guard_json = guard_verdict.model_dump_json(indent=2)
+            guard_result = await self.artifact_store.store(
+                run_id, ArtifactType.REVIEW, guard_json,
+                filename="migration_guard_review.json",
+            )
+            await artifact_queries.store_artifact(
+                self.session, run_id, ArtifactType.REVIEW.value,
+                guard_result["storage_path"], guard_result["size_bytes"],
+                guard_result["checksum"],
+            )
+
+            if guard_verdict.verdict == ReviewVerdictType.REJECT:
+                # Migration guard rejects — fail review, skip standard review
+                run = await run_queries.get_run(self.session, run_id)
+                if run is not None:
+                    run.error_message = f"Migration guard rejected: {guard_verdict.summary}"
+                    await self.session.flush()
+
+                await self._transition(
+                    run_id, RunState.REVIEWING, RunState.REVIEW_FAILED,
+                    f"Migration guard rejected: {guard_verdict.summary}",
+                    metadata={
+                        "verdict": guard_verdict.verdict.value,
+                        "summary": guard_verdict.summary,
+                    },
+                )
+                return guard_verdict
+
+            # APPROVE or REQUEST_CHANGES — log and continue to standard review
+            await self._add_event(
+                run_id, RunState.REVIEWING,
+                f"Migration guard verdict: {guard_verdict.verdict.value} "
+                f"— proceeding to standard review",
+                metadata={
+                    "artifact": "migration_guard_review.json",
+                    "verdict": guard_verdict.verdict.value,
+                    "issue_count": len(guard_verdict.issues),
+                },
+            )
+
+        # 4. Standard blind review
         await self._add_event(
             run_id, RunState.REVIEWING,
             "Blind review started",
@@ -1029,10 +1128,9 @@ class RunEngine:
             model_used=review_model,
         )
 
-        # 2. Generate PR title and description
+        # Generate PR title and description
         pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
 
-        changed_files = _extract_changed_files(diff)
         changes_summary = ", ".join(changed_files[:10]) if changed_files else "no files detected"
         if len(changed_files) > 10:
             changes_summary += f" (+{len(changed_files) - 10} more)"
@@ -1041,7 +1139,7 @@ class RunEngine:
             f"Changed files: {changes_summary}"
         )
 
-        # 3. Call reviewer (blind — no plan)
+        # Call reviewer (blind — no plan)
         t0 = time.monotonic()
         review = await self.agent_runner.run_reviewer(
             diff=diff,
@@ -1051,7 +1149,7 @@ class RunEngine:
         )
         review_ms = int((time.monotonic() - t0) * 1000)
 
-        # 4. Serialize and store review.json artifact
+        # 5. Serialize and store review.json artifact
         review_json = review.model_dump_json(indent=2)
         result = await self.artifact_store.store(
             run_id, ArtifactType.REVIEW, review_json,
@@ -1062,7 +1160,7 @@ class RunEngine:
             result["storage_path"], result["size_bytes"], result["checksum"],
         )
 
-        # 5. Log review completed
+        # 6. Log review completed
         issue_count = len(review.issues)
         await self._add_event(
             run_id, RunState.REVIEWING,
@@ -1077,7 +1175,7 @@ class RunEngine:
             duration_ms=review_ms,
         )
 
-        # 6. Handle verdict
+        # 7. Handle verdict
         if review.verdict == ReviewVerdictType.REJECT:
             run = await run_queries.get_run(self.session, run_id)
             if run is not None:
@@ -1104,43 +1202,92 @@ class RunEngine:
         self,
         run_id: UUID,
         diff: str,
+        changed_files: list[str],
+        task_request: TaskRequest,
     ) -> ReviewVerdict | None:
         """Check if the diff touches protected paths and run migration guard.
 
-        Automatically invoked if any changed file matches: migrations/, auth/,
-        infra/, *.env*, docker-compose*, Dockerfile*.
+        Scans changed_files against protected path patterns. If no protected
+        paths are touched, returns None. Otherwise:
+
+        - For bug_fix tasks: returns an automatic REJECT without calling the LLM.
+        - For allowed task types (endpoint_build, refactor, migration_plan,
+          canon_update): escalates to the migration guard LLM subagent.
+        - For all other task types: returns an automatic REJECT (unauthorized).
 
         Args:
             run_id: ID of the current run.
-            diff: The git diff to check.
+            diff: The git diff to review.
+            changed_files: List of changed file paths from the diff.
+            task_request: The task request for task type routing.
 
         Returns:
-            ReviewVerdict if migration guard was triggered, None otherwise.
+            ReviewVerdict if migration guard was triggered, None if no
+            protected paths were touched.
         """
-        import re
-        from foundry.contracts.shared import ReviewVerdictType
+        protected_files = _match_protected_paths(changed_files)
 
-        # Check if diff touches protected paths
-        protected_patterns = [
-            r"[ab]/migrations/",
-            r"[ab]/auth/",
-            r"[ab]/infra/",
-            r"[ab]/.*Dockerfile",
-            r"[ab]/.*docker-compose",
-        ]
-        touches_protected = any(
-            re.search(pattern, line)
-            for pattern in protected_patterns
-            for line in diff.split("\n")
-            if line.startswith("diff --git") or line.startswith("---") or line.startswith("+++")
-        )
-
-        if not touches_protected:
+        if not protected_files:
             return None
 
-        logger.warning("Run %s touches protected paths — invoking migration guard", run_id)
-        guard_verdict = await self.agent_runner.run_migration_guard(diff)
-        return guard_verdict
+        # Log the trigger event
+        await self._add_event(
+            run_id, RunState.REVIEWING,
+            f"Migration guard triggered: {protected_files}",
+            metadata={"protected_files": protected_files},
+        )
+
+        logger.warning(
+            "Run %s touches protected paths %s — task type: %s",
+            run_id, protected_files, task_request.task_type.value,
+        )
+
+        # bug_fix tasks must not modify protected paths — auto-reject
+        if task_request.task_type == TaskType.BUG_FIX:
+            files_str = ", ".join(protected_files)
+            return ReviewVerdict(
+                verdict=ReviewVerdictType.REJECT,
+                issues=[
+                    ReviewIssue(
+                        severity=ReviewSeverity.CRITICAL,
+                        file_path=protected_files[0],
+                        description=(
+                            f"Bug fix tasks must not modify protected paths. "
+                            f"Files: {files_str}"
+                        ),
+                    ),
+                ],
+                summary=f"Bug fix tasks must not modify protected paths. Files: {files_str}",
+                confidence=1.0,
+            )
+
+        # Allowed task types get LLM-powered migration guard review
+        if task_request.task_type in MIGRATION_GUARD_ALLOWED_TASK_TYPES:
+            return await self.agent_runner.run_migration_guard(
+                diff=diff,
+                changed_files=protected_files,
+            )
+
+        # All other task types are not authorized — auto-reject
+        files_str = ", ".join(protected_files)
+        return ReviewVerdict(
+            verdict=ReviewVerdictType.REJECT,
+            issues=[
+                ReviewIssue(
+                    severity=ReviewSeverity.CRITICAL,
+                    file_path=protected_files[0],
+                    description=(
+                        f"Task type {task_request.task_type.value} is not authorized "
+                        f"to modify protected paths. Files: {files_str}"
+                    ),
+                ),
+            ],
+            summary=(
+                f"Task type {task_request.task_type.value} is not authorized "
+                f"to modify protected paths. Files: {files_str}"
+            ),
+            confidence=1.0,
+        )
 
     async def _open_pr(
         self,
