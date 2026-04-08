@@ -275,9 +275,11 @@ class RunEngine:
 
         except Exception as e:
             logger.exception("Run %s failed unexpectedly: %s", run_id, traceback.format_exc())
+            state_at_failure = "unknown"
             try:
                 run = await run_queries.get_run(self.session, run_id)
                 if run and run.state not in ("completed", "cancelled", "errored"):
+                    state_at_failure = run.state
                     current_state = RunState(run.state)
                     if RunState.ERRORED in VALID_TRANSITIONS.get(current_state, set()):
                         await self._transition(run_id, current_state, RunState.ERRORED, f"Unexpected error: {e}")
@@ -288,16 +290,31 @@ class RunEngine:
             except Exception:
                 logger.exception("Failed to transition run %s to errored state", run_id)
 
-            # Store error artifact
+            # Fetch last event for diagnostics
+            last_event_msg = ""
+            try:
+                events = await run_queries.get_run_events(self.session, run_id)
+                if events:
+                    last_event_msg = events[-1].message
+            except Exception:
+                pass
+
+            # Store error artifact with full diagnostic context
             try:
                 error_data = json.dumps({
                     "error": str(e),
                     "traceback": traceback.format_exc(),
                     "phase": "execute_run",
+                    "state_at_failure": state_at_failure,
+                    "last_event": last_event_msg,
                 })
-                await self.artifact_store.store(run_id, ArtifactType.ERROR_LOG, error_data)
+                result = await self.artifact_store.store(run_id, ArtifactType.ERROR_LOG, error_data)
+                await artifact_queries.store_artifact(
+                    self.session, run_id, ArtifactType.ERROR_LOG.value,
+                    result["storage_path"], result["size_bytes"], result["checksum"],
+                )
             except Exception:
-                pass
+                logger.exception("Failed to store error artifact for run %s", run_id)
 
             return await _build_run_response(self.session, run_id)
 
@@ -522,13 +539,12 @@ class RunEngine:
 
             # Serialize plan to JSON, store as plan.json
             plan_json = plan.model_dump_json(indent=2)
-            storage_path = await self.artifact_store.store(
+            result = await self.artifact_store.store(
                 run_id, ArtifactType.PLAN, plan_json, filename="plan.json",
             )
             await artifact_queries.store_artifact(
                 self.session, run_id, ArtifactType.PLAN.value,
-                storage_path, len(plan_json.encode()),
-                self.artifact_store.get_checksum(plan_json),
+                result["storage_path"], result["size_bytes"], result["checksum"],
             )
 
             return plan
@@ -538,12 +554,12 @@ class RunEngine:
             # Store error_log artifact
             error_data = json.dumps({"error": str(e), "phase": "planning"})
             try:
-                storage_path = await self.artifact_store.store(
+                result = await self.artifact_store.store(
                     run_id, ArtifactType.ERROR_LOG, error_data,
                 )
                 await artifact_queries.store_artifact(
                     self.session, run_id, ArtifactType.ERROR_LOG.value,
-                    storage_path, len(error_data.encode()),
+                    result["storage_path"], result["size_bytes"], result["checksum"],
                 )
             except Exception:
                 logger.exception("Failed to store error log for run %s", run_id)
@@ -614,13 +630,12 @@ class RunEngine:
 
             # Store diff artifact
             if diff.strip():
-                storage_path = await self.artifact_store.store(
+                result = await self.artifact_store.store(
                     run_id, ArtifactType.DIFF, diff,
                 )
                 await artifact_queries.store_artifact(
                     self.session, run_id, ArtifactType.DIFF.value,
-                    storage_path, len(diff.encode()),
-                    self.artifact_store.get_checksum(diff),
+                    result["storage_path"], result["size_bytes"], result["checksum"],
                 )
 
             return diff
@@ -631,12 +646,12 @@ class RunEngine:
             # Store error_log artifact
             error_data = json.dumps({"error": str(e), "phase": "implementation"})
             try:
-                storage_path = await self.artifact_store.store(
+                result = await self.artifact_store.store(
                     run_id, ArtifactType.ERROR_LOG, error_data,
                 )
                 await artifact_queries.store_artifact(
                     self.session, run_id, ArtifactType.ERROR_LOG.value,
-                    storage_path, len(error_data.encode()),
+                    result["storage_path"], result["size_bytes"], result["checksum"],
                 )
             except Exception:
                 logger.exception("Failed to store error log for run %s", run_id)
@@ -694,10 +709,11 @@ class RunEngine:
         # 2. Extract changed files from stored diff artifact
         changed_files: list[str] = []
         try:
-            artifact_paths = await self.artifact_store.list_artifacts(run_id)
-            for path in artifact_paths:
-                if "diff" in path:
-                    raw = await self.artifact_store.retrieve(path)
+            artifact_entries = await self.artifact_store.list_artifacts(run_id)
+            for entry in artifact_entries:
+                if "diff" in entry["filename"]:
+                    storage_path = f"runs/{run_id}/{entry['filename']}"
+                    raw = await self.artifact_store.retrieve(storage_path)
                     diff_text = raw.decode("utf-8", errors="replace")
                     for line in diff_text.split("\n"):
                         if line.startswith("diff --git"):
@@ -753,14 +769,13 @@ class RunEngine:
             ],
             indent=2,
         )
-        storage_path = await self.artifact_store.store(
+        result = await self.artifact_store.store(
             run_id, ArtifactType.VERIFICATION, verification_data,
             filename="verification.json",
         )
-        checksum = self.artifact_store.get_checksum(verification_data)
         await artifact_queries.store_artifact(
             self.session, run_id, ArtifactType.VERIFICATION.value,
-            storage_path, len(verification_data.encode()), checksum,
+            result["storage_path"], result["size_bytes"], result["checksum"],
         )
 
         # 5. Handle pass/fail with state transitions and run events
@@ -850,14 +865,13 @@ class RunEngine:
 
         # 4. Serialize and store review.json artifact
         review_json = review.model_dump_json(indent=2)
-        storage_path = await self.artifact_store.store(
+        result = await self.artifact_store.store(
             run_id, ArtifactType.REVIEW, review_json,
             filename="review.json",
         )
         await artifact_queries.store_artifact(
             self.session, run_id, ArtifactType.REVIEW.value,
-            storage_path, len(review_json.encode()),
-            self.artifact_store.get_checksum(review_json),
+            result["storage_path"], result["size_bytes"], result["checksum"],
         )
 
         # 5. Add run event with review summary
@@ -1013,10 +1027,11 @@ class RunEngine:
         # 5. Load verification results from stored artifact (if available)
         verification_results: list[dict] = []
         try:
-            artifact_paths = await self.artifact_store.list_artifacts(run_id)
-            for path in artifact_paths:
-                if "verification" in path:
-                    raw = await self.artifact_store.retrieve(path)
+            artifact_entries = await self.artifact_store.list_artifacts(run_id)
+            for entry in artifact_entries:
+                if "verification" in entry["filename"]:
+                    storage_path = f"runs/{run_id}/{entry['filename']}"
+                    raw = await self.artifact_store.retrieve(storage_path)
                     verification_results = json.loads(raw)
                     break
         except Exception:
@@ -1044,13 +1059,15 @@ class RunEngine:
             "branch": branch_name,
             "base": task_request.base_branch,
             "title": pr_title,
+            "labels": ["foundry", "needs-human-review", task_request.task_type.value],
         }, indent=2)
-        storage_path = await self.artifact_store.store(
+        pr_result_meta = await self.artifact_store.store(
             run_id, ArtifactType.PR_METADATA, pr_metadata,
         )
         await artifact_queries.store_artifact(
             self.session, run_id, ArtifactType.PR_METADATA.value,
-            storage_path, len(pr_metadata.encode()),
+            pr_result_meta["storage_path"], pr_result_meta["size_bytes"],
+            pr_result_meta["checksum"],
         )
 
         # 8. Update run with PR URL

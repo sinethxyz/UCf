@@ -555,9 +555,10 @@ class TestRunImplementation:
 
         artifacts = await artifact_store.list_artifacts(run_id)
         assert len(artifacts) == 1
-        assert "diff" in artifacts[0]
+        assert "diff" in artifacts[0]["filename"]
 
-        content = await artifact_store.retrieve(artifacts[0])
+        storage_path = f"runs/{run_id}/{artifacts[0]['filename']}"
+        content = await artifact_store.retrieve(storage_path)
         assert b"handler.go" in content
 
     async def test_stores_error_log_on_failure(
@@ -582,7 +583,8 @@ class TestRunImplementation:
 
         artifacts = await artifact_store.list_artifacts(run_id)
         assert len(artifacts) == 1
-        content = json.loads(await artifact_store.retrieve(artifacts[0]))
+        storage_path = f"runs/{run_id}/{artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert content["error"] == "Agent crashed"
         assert content["phase"] == "implementation"
 

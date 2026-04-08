@@ -620,9 +620,9 @@ class TestReviewArtifactStorage:
         await engine._run_review(run_id, SAMPLE_DIFF, sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        review_artifacts = [a for a in artifacts if "review" in a]
+        review_artifacts = [a for a in artifacts if "review" in a["filename"]]
         assert len(review_artifacts) == 1
-        assert "review.json" in review_artifacts[0]
+        assert "review.json" in review_artifacts[0]["filename"]
 
     async def test_review_json_contains_verdict_data(
         self,
@@ -639,8 +639,9 @@ class TestReviewArtifactStorage:
         await engine._run_review(run_id, SAMPLE_DIFF, sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        review_artifacts = [a for a in artifacts if "review" in a]
-        content = json.loads(await artifact_store.retrieve(review_artifacts[0]))
+        review_artifacts = [a for a in artifacts if "review" in a["filename"]]
+        storage_path = f"runs/{run_id}/{review_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
 
         assert content["verdict"] == "reject"
         assert len(content["issues"]) == 1
@@ -703,10 +704,11 @@ class TestReviewArtifactStorage:
         await engine._run_review(run_id, SAMPLE_DIFF, sample_task_request)
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        review_artifacts = [a for a in artifacts if "review" in a]
+        review_artifacts = [a for a in artifacts if "review" in a["filename"]]
         assert len(review_artifacts) == 1
 
-        content = json.loads(await artifact_store.retrieve(review_artifacts[0]))
+        storage_path = f"runs/{run_id}/{review_artifacts[0]['filename']}"
+        content = json.loads(await artifact_store.retrieve(storage_path))
         assert content["verdict"] == "request_changes"
         assert len(content["issues"]) == 2
 
@@ -729,8 +731,9 @@ class TestReviewArtifactStorage:
         stored_checksum = review_db[0].checksum
 
         artifacts = await artifact_store.list_artifacts(run_id)
-        review_artifacts = [a for a in artifacts if "review" in a]
-        raw = await artifact_store.retrieve(review_artifacts[0])
+        review_artifacts = [a for a in artifacts if "review" in a["filename"]]
+        storage_path = f"runs/{run_id}/{review_artifacts[0]['filename']}"
+        raw = await artifact_store.retrieve(storage_path)
         expected_checksum = artifact_store.get_checksum(raw)
 
         assert stored_checksum == expected_checksum
