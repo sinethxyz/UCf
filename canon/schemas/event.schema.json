@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn-protocol.dev/schemas/event.schema.json",
+  "title": "Event",
+  "description": "A structured event extracted from a source document. Events are the atomic unit of signal in Unicorn Protocol — they represent something that happened to or within a company, grounded in evidence from the source.",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this event."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "funding_round",
+        "product_launch",
+        "hire",
+        "departure",
+        "partnership",
+        "acquisition",
+        "expansion",
+        "layoff",
+        "regulatory_action",
+        "pivot",
+        "milestone",
+        "shutdown",
+        "rebrand",
+        "pricing_change",
+        "integration",
+        "open_source_release",
+        "market_entry",
+        "award",
+        "legal_action"
+      ],
+      "description": "The category of event. Must be one of the defined event taxonomy types."
+    },
+    "company_id": {
+      "type": ["string", "null"],
+      "description": "Resolved company identifier. Null when the company has not yet been matched to a canonical entity in the system."
+    },
+    "company_hint": {
+      "type": "object",
+      "description": "Hints for company resolution when company_id is not yet resolved. Used by the matching pipeline to link this event to a canonical company entity.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Primary company name as it appears in the source."
+        },
+        "domain": {
+          "type": ["string", "null"],
+          "format": "hostname",
+          "description": "Company website domain if mentioned or inferable from the source."
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Alternative names, abbreviations, or former names for the company found in the source."
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Short human-readable summary of the event (e.g. \"Acme Corp raises $50M Series B\")."
+    },
+    "description": {
+      "type": "string",
+      "description": "Longer detail about the event, providing context beyond the title."
+    },
+    "occurred_at": {
+      "type": "string",
+      "description": "When the event occurred, in ISO 8601 format. May be a full datetime (2024-03-15T10:30:00Z) or a date (2024-03-15) depending on available precision.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})?)?$"
+    },
+    "occurred_at_precision": {
+      "type": "string",
+      "enum": [
+        "day",
+        "month",
+        "quarter",
+        "year"
+      ],
+      "description": "How precise the occurred_at date actually is. Sources often say 'in Q3 2024' or 'last year' — this field captures that the specific date is an approximation."
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the source document this event was extracted from."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "evidence.schema.json"
+      },
+      "minItems": 1,
+      "description": "Supporting evidence for this event. Every event must have at least one piece of evidence grounding it in the source text."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Model's confidence that this event actually occurred as described, from 0.0 (no confidence) to 1.0 (certain)."
+    },
+    "confidence_rationale": {
+      "type": "string",
+      "description": "Explanation of why the model assigned this confidence level. Should reference the evidence strength and any ambiguities."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Freeform object for event-type-specific fields (e.g. funding_amount, role_title, acquirer_name, headcount_affected). Structure varies by event_type."
+    },
+    "extraction_version": {
+      "type": "string",
+      "description": "Schema version tag indicating which version of the extraction schema produced this event."
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "company_hint",
+    "title",
+    "occurred_at",
+    "occurred_at_precision",
+    "source_id",
+    "evidence",
+    "confidence"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn-protocol.dev/schemas/evidence.schema.json",
+  "title": "Evidence",
+  "description": "A single piece of evidence supporting a field in an extracted event. Evidence connects extracted claims back to source text with provenance and strength assessment.",
+  "type": "object",
+  "properties": {
+    "evidence_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this evidence item."
+    },
+    "evidence_type": {
+      "type": "string",
+      "enum": [
+        "direct_quote",
+        "paraphrase",
+        "quantitative_claim",
+        "inferred",
+        "contextual"
+      ],
+      "description": "How the evidence was derived from the source. direct_quote is verbatim text, paraphrase is restated, quantitative_claim is a specific number or metric, inferred is a logical deduction from surrounding text, contextual is background information that supports the claim."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The extracted or quoted supporting text from the source."
+    },
+    "source_location": {
+      "type": "object",
+      "description": "Best-effort provenance pointing back to where in the source this evidence was found.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the source document, if available."
+        },
+        "paragraph_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based index of the paragraph within the source document."
+        },
+        "char_range": {
+          "type": "object",
+          "description": "Character offset range within the source text.",
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Start character offset (inclusive)."
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "End character offset (exclusive)."
+            }
+          },
+          "required": ["start", "end"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "supports_field": {
+      "type": "string",
+      "description": "Which event field this evidence supports, using dot notation for nested fields (e.g. \"event_type\", \"occurred_at\", \"metadata.funding_amount\")."
+    },
+    "strength": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "moderate",
+        "weak",
+        "circumstantial"
+      ],
+      "description": "How strongly this evidence supports the claim. strong: unambiguous direct support. moderate: clear but indirect or partially ambiguous. weak: suggestive but not conclusive. circumstantial: tangential or requires significant interpretation."
+    },
+    "extraction_note": {
+      "type": "string",
+      "description": "Optional note from the extraction model about difficulty or ambiguity encountered when extracting this evidence."
+    }
+  },
+  "required": [
+    "evidence_id",
+    "evidence_type",
+    "text",
+    "strength"
+  ],
+  "additionalProperties": false
+}
