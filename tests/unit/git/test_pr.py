@@ -75,6 +75,7 @@ def review_verdict() -> ReviewVerdict:
             ),
         ],
         summary="Clean fix for the off-by-one pagination bug.",
+        confidence=0.92,
     )
 
 

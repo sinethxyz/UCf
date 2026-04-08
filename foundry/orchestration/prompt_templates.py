@@ -144,7 +144,8 @@ Output requirements:
         "suggestion": "<how to fix>" | null
       }
     ],
-    "summary": "<overall assessment>"
+    "summary": "<overall assessment>",
+    "confidence": <0.0-1.0>
   }
 
 Review criteria:
@@ -158,7 +159,12 @@ Review criteria:
 Verdicts:
 - "approve": No critical or major issues.
 - "request_changes": Major issues that must be fixed.
-- "reject": Fundamental design problems requiring a new approach.\
+- "reject": Fundamental design problems requiring a new approach.
+
+Confidence:
+- 1.0: The diff is small, clear, and you are certain of your verdict.
+- 0.7-0.9: The diff is understandable but some context is missing.
+- Below 0.7: The diff is large, ambiguous, or touches unfamiliar areas.\
 """
 
 MIGRATION_GUARD_SYSTEM = """\
