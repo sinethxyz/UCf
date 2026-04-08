@@ -44,10 +44,30 @@ class RunResponse(FoundryBaseModel):
     base_branch: str
     title: str
     state: RunState
+    worktree_path: str | None = None
     branch_name: str | None = None
     pr_url: str | None = None
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    event_count: int = 0
+    artifact_count: int = 0
     metadata: dict = Field(default_factory=dict)
+
+
+class VerificationCheckResult(FoundryBaseModel):
+    """Result of a single verification check."""
+
+    check_type: str
+    passed: bool
+    output: str | None = None
+    duration_ms: int | None = None
+
+
+class VerificationResponse(FoundryBaseModel):
+    """Structured verification results for a run."""
+
+    run_id: UUID
+    passed: bool
+    checks: list[VerificationCheckResult] = Field(default_factory=list)
