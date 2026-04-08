@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn-protocol.dev/schemas/extraction_result.schema.json",
+  "title": "Extraction Result",
+  "description": "Wrapper for the output of one extraction run against a single source document. Contains zero or more extracted events, plus diagnostics about the extraction process. An empty events array is a valid outcome — not every source contains extractable events.",
+  "type": "object",
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the source document that was processed."
+    },
+    "source_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 hex digest of the raw source text, used for deduplication and integrity verification."
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "event.schema.json"
+      },
+      "description": "Extracted events from this source. May be empty if no events were found."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Model-noted ambiguities or low-confidence flags about the extraction. These do not indicate failure but highlight areas a human reviewer should inspect."
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Structural issues the model detected in the source document (e.g. truncated text, encoding problems, contradictory information)."
+    },
+    "unparsed_fragments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Text fragments the model could not classify into any event type. Useful for identifying gaps in the event taxonomy."
+    },
+    "extraction_model": {
+      "type": "string",
+      "description": "Identifier of the model used for extraction (e.g. \"claude-sonnet-4-6\")."
+    },
+    "extraction_duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wall-clock time in milliseconds that the extraction took."
+    },
+    "schema_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version tag of the extraction schema used, for tracking schema evolution across runs."
+    }
+  },
+  "required": [
+    "source_id",
+    "source_hash",
+    "events",
+    "schema_version"
+  ],
+  "additionalProperties": false
+}
