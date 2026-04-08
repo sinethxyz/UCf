@@ -153,6 +153,17 @@ _RETRYABLE_STATES: set[RunState] = {
 QUEUE_KEY = "foundry:runs"
 
 
+def _extract_changed_files(diff: str) -> list[str]:
+    """Extract changed file paths from a git diff."""
+    files = []
+    for line in diff.split("\n"):
+        if line.startswith("diff --git"):
+            parts = line.split(" b/", 1)
+            if len(parts) == 2:
+                files.append(parts[1])
+    return files
+
+
 class RunEngine:
     """Core run lifecycle state machine.
 
@@ -243,17 +254,18 @@ class RunEngine:
                 return await _build_run_response(self.session, run_id)
 
             # 6. Run review (blind — reviewer does not see the plan)
-            await self._transition(run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING, "Starting review")
+            # _run_review handles VERIFICATION_PASSED → REVIEWING transition,
+            # artifact storage, run events, and REJECT → REVIEW_FAILED internally.
             review = await self._run_review(run_id, diff, task_request)
 
-            # Check migration guard if needed
+            if review.verdict == ReviewVerdictType.REJECT:
+                # _run_review already transitioned to REVIEW_FAILED and set error_message
+                return await _build_run_response(self.session, run_id)
+
+            # Check migration guard if needed (only if review didn't reject)
             guard_verdict = await self._check_migration_guard(run_id, diff)
             if guard_verdict and guard_verdict.verdict == ReviewVerdictType.REJECT:
                 await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, "Migration guard rejected")
-                return await _build_run_response(self.session, run_id)
-
-            if review.verdict == ReviewVerdictType.REJECT:
-                await self._transition(run_id, RunState.REVIEWING, RunState.REVIEW_FAILED, f"Review rejected: {review.summary}")
                 return await _build_run_response(self.session, run_id)
 
             # 7. Open PR (handles REVIEWING → PR_OPENED → COMPLETED transitions)
@@ -789,6 +801,17 @@ class RunEngine:
         The reviewer does NOT see the plan — it judges the diff on its own
         merits to prevent confirmation bias.
 
+        Handles the full review lifecycle:
+        1. Transition to REVIEWING state.
+        2. Generate PR title and description for reviewer context.
+        3. Extract changed files from the diff.
+        4. Call agent_runner.run_reviewer() with diff, title, description, changed_files.
+        5. Serialize ReviewVerdict to JSON and store as review.json artifact.
+        6. Register artifact in DB with size and checksum.
+        7. Add run event with review summary (verdict, issue count, confidence).
+        8. If REJECT: transition to REVIEW_FAILED, attach rejection summary to error_message.
+        9. If REQUEST_CHANGES: add event noting advisory changes will be in PR.
+
         Args:
             run_id: ID of the current run.
             diff: The git diff to review.
@@ -799,27 +822,78 @@ class RunEngine:
         """
         from foundry.contracts.shared import ReviewVerdictType
 
-        # Generate PR title/description for the reviewer
-        task_type_slug = task_request.task_type.value.replace("_", " ")
-        pr_title = f"[Foundry] {task_type_slug}: {task_request.title}"
-        pr_description = task_request.prompt[:500]
+        # 1. Transition to REVIEWING
+        await self._transition(
+            run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING,
+            "Starting blind review",
+        )
 
+        # 2. Generate PR title and description
+        pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
+
+        changed_files = _extract_changed_files(diff)
+        changes_summary = ", ".join(changed_files[:10]) if changed_files else "no files detected"
+        if len(changed_files) > 10:
+            changes_summary += f" (+{len(changed_files) - 10} more)"
+        pr_description = (
+            f"{task_request.prompt[:500]}\n\n"
+            f"Changed files: {changes_summary}"
+        )
+
+        # 3. Call reviewer (blind — no plan)
         review = await self.agent_runner.run_reviewer(
             diff=diff,
             pr_title=pr_title,
             pr_description=pr_description,
+            changed_files=changed_files,
         )
 
-        # Store review artifact
+        # 4. Serialize and store review.json artifact
         review_json = review.model_dump_json(indent=2)
         storage_path = await self.artifact_store.store(
             run_id, ArtifactType.REVIEW, review_json,
+            filename="review.json",
         )
         await artifact_queries.store_artifact(
             self.session, run_id, ArtifactType.REVIEW.value,
             storage_path, len(review_json.encode()),
             self.artifact_store.get_checksum(review_json),
         )
+
+        # 5. Add run event with review summary
+        issue_count = len(review.issues)
+        review_event = RunEventORM(
+            run_id=run_id,
+            state=RunState.REVIEWING.value,
+            message=(
+                f"Review complete — verdict: {review.verdict.value}, "
+                f"issues: {issue_count}, confidence: {review.confidence:.2f}"
+            ),
+        )
+        await run_queries.add_run_event(self.session, review_event)
+
+        # 6. Handle verdict
+        if review.verdict == ReviewVerdictType.REJECT:
+            run = await run_queries.get_run(self.session, run_id)
+            if run is not None:
+                run.error_message = f"Review rejected: {review.summary}"
+                await self.session.flush()
+
+            await self._transition(
+                run_id, RunState.REVIEWING, RunState.REVIEW_FAILED,
+                f"Review rejected: {review.summary}",
+            )
+
+        elif review.verdict == ReviewVerdictType.REQUEST_CHANGES:
+            advisory_event = RunEventORM(
+                run_id=run_id,
+                state=RunState.REVIEWING.value,
+                message=(
+                    f"Review requested changes ({issue_count} issues). "
+                    f"PR will include requested changes as comments."
+                ),
+            )
+            await run_queries.add_run_event(self.session, advisory_event)
 
         return review
 
