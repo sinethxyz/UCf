@@ -74,6 +74,27 @@ def _build_pr_body(
     review_summary = review_verdict.summary if review_verdict else "No review"
     review_issues_count = len(review_verdict.issues) if review_verdict else 0
 
+    review_detail = f"Verdict: {review_verdict_str}\nIssues: {review_issues_count}\n{review_summary}"
+
+    # Include individual issues when verdict is request_changes
+    if (
+        review_verdict
+        and review_verdict.verdict.value == "request_changes"
+        and review_verdict.issues
+    ):
+        issue_lines: list[str] = []
+        for issue in review_verdict.issues:
+            loc = f" ({issue.file_path}"
+            if issue.line_range:
+                loc += f":{issue.line_range}"
+            loc += ")"
+            issue_lines.append(
+                f"- **{issue.severity.value}**{loc}: {issue.description}"
+            )
+            if issue.suggestion:
+                issue_lines.append(f"  - Suggestion: {issue.suggestion}")
+        review_detail += "\n\n### Requested Changes\n" + "\n".join(issue_lines)
+
     # Run metadata
     model_used = task_request.model_override or "default"
 
@@ -91,9 +112,7 @@ def _build_pr_body(
 {verification_section}
 
 ## Review
-Verdict: {review_verdict_str}
-Issues: {review_issues_count}
-{review_summary}
+{review_detail}
 
 ## Artifacts
 - Plan: `runs/{run_id}/plan.json`
