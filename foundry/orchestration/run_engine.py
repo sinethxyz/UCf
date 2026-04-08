@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+import traceback as tb_module
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -215,8 +217,6 @@ class RunEngine:
         Returns:
             RunResponse with final state and metadata.
         """
-        import traceback
-
         from foundry.contracts.shared import ReviewVerdictType
 
         # 1. Create run record in QUEUED state
@@ -225,11 +225,17 @@ class RunEngine:
         worktree_path: str | None = None
         logger.info("Created run %s for task: %s", run_id, task_request.title)
 
-        # Add initial event
+        # Add initial event — run queued
         event = RunEventORM(
             run_id=run_id,
             state=RunState.QUEUED.value,
-            message=f"Run created for {task_request.task_type.value}: {task_request.title}",
+            message="Run accepted and queued",
+            metadata_={
+                "task_type": task_request.task_type.value,
+                "repo": task_request.repo,
+                "base_branch": task_request.base_branch,
+                "title": task_request.title,
+            },
         )
         await run_queries.add_run_event(self.session, event)
 
@@ -274,18 +280,30 @@ class RunEngine:
             return await _build_run_response(self.session, run_id)
 
         except Exception as e:
-            logger.exception("Run %s failed unexpectedly: %s", run_id, traceback.format_exc())
+            full_traceback = tb_module.format_exc()
+            logger.exception("Run %s failed unexpectedly: %s", run_id, full_traceback)
             state_at_failure = "unknown"
             try:
                 run = await run_queries.get_run(self.session, run_id)
                 if run and run.state not in ("completed", "cancelled", "errored"):
                     state_at_failure = run.state
                     current_state = RunState(run.state)
+                    # Abbreviate traceback for metadata (last 1500 chars)
+                    abbreviated_tb = full_traceback[-1500:] if len(full_traceback) > 1500 else full_traceback
                     if RunState.ERRORED in VALID_TRANSITIONS.get(current_state, set()):
-                        await self._transition(run_id, current_state, RunState.ERRORED, f"Unexpected error: {e}")
+                        await self._transition(
+                            run_id, current_state, RunState.ERRORED,
+                            f"Run failed: {e}",
+                            metadata={"traceback": abbreviated_tb, "phase": state_at_failure},
+                        )
                     else:
                         await run_queries.update_run_state(
                             self.session, run_id, RunState.ERRORED.value, str(e),
+                        )
+                        await self._add_event(
+                            run_id, RunState.ERRORED,
+                            f"Run failed: {e}",
+                            metadata={"traceback": abbreviated_tb, "phase": state_at_failure},
                         )
             except Exception:
                 logger.exception("Failed to transition run %s to errored state", run_id)
@@ -303,7 +321,7 @@ class RunEngine:
             try:
                 error_data = json.dumps({
                     "error": str(e),
-                    "traceback": traceback.format_exc(),
+                    "traceback": full_traceback,
                     "phase": "execute_run",
                     "state_at_failure": state_at_failure,
                     "last_event": last_event_msg,
@@ -348,7 +366,11 @@ class RunEngine:
         if current_state not in _CANCELLABLE_STATES:
             raise ValueError(f"Run {run_id} in state {current_state.value} cannot be cancelled")
 
-        await self._transition(run_id, current_state, RunState.CANCELLED, "Cancelled by user")
+        await self._transition(
+            run_id, current_state, RunState.CANCELLED,
+            "Run cancelled by user",
+            metadata={"previous_state": current_state.value},
+        )
 
         # Clean up worktree if it exists
         if run.worktree_path:
@@ -386,7 +408,11 @@ class RunEngine:
                 f"Only runs in {', '.join(s.value for s in sorted(_RETRYABLE_STATES, key=lambda s: s.value))} can be retried."
             )
 
-        await self._transition(run_id, current_state, RunState.QUEUED, "Retrying run")
+        await self._transition(
+            run_id, current_state, RunState.QUEUED,
+            "Run retried, re-queued",
+            metadata={"previous_state": current_state.value},
+        )
 
         # Clean up worktree if it exists and clear the path on the run row
         if run.worktree_path:
@@ -422,17 +448,27 @@ class RunEngine:
         from_state: RunState,
         to_state: RunState,
         message: str = "",
+        metadata: dict | None = None,
+        model_used: str | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        duration_ms: int | None = None,
     ) -> None:
         """Validate and execute a state transition.
 
         Checks that the transition is allowed by VALID_TRANSITIONS, updates
-        the run record in the database, and emits a RunEvent.
+        the run record in the database, and emits a RunEvent with full metadata.
 
         Args:
             run_id: ID of the run being transitioned.
             from_state: The current state (must match DB).
             to_state: The target state.
             message: Human-readable message for the RunEvent.
+            metadata: Optional metadata dict for the event.
+            model_used: Model name if a model was involved.
+            tokens_in: Input tokens consumed.
+            tokens_out: Output tokens generated.
+            duration_ms: Duration of the phase in milliseconds.
 
         Raises:
             ValueError: If the transition is not valid.
@@ -450,9 +486,43 @@ class RunEngine:
             run_id=run_id,
             state=to_state.value,
             message=message or f"Transitioned to {to_state.value}",
+            metadata_=metadata or {},
+            model_used=model_used,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            duration_ms=duration_ms,
         )
         await run_queries.add_run_event(self.session, event)
         logger.info("Run %s: %s -> %s (%s)", run_id, from_state.value, to_state.value, message)
+
+    async def _add_event(
+        self,
+        run_id: UUID,
+        state: RunState,
+        message: str,
+        metadata: dict | None = None,
+        model_used: str | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        duration_ms: int | None = None,
+    ) -> None:
+        """Emit a run event without a state transition.
+
+        Used for intra-phase milestones (e.g. individual verification checks,
+        planning/implementation progress) where the run state itself does not
+        change but the event should be recorded in the timeline.
+        """
+        event = RunEventORM(
+            run_id=run_id,
+            state=state.value,
+            message=message,
+            metadata_=metadata or {},
+            model_used=model_used,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            duration_ms=duration_ms,
+        )
+        await run_queries.add_run_event(self.session, event)
 
     # ------------------------------------------------------------------
     # Phase implementations
@@ -490,11 +560,13 @@ class RunEngine:
         branch_name = generate_branch_name(task_request.task_type, task_request.title)
 
         # 3. Create worktree
+        t0 = time.monotonic()
         worktree_path = await self.worktree_manager.create(
             repo=task_request.repo,
             branch_name=branch_name,
             run_id=run_id,
         )
+        wt_ms = int((time.monotonic() - t0) * 1000)
 
         # 4. Update run record with worktree info
         run = await run_queries.get_run(self.session, run_id)
@@ -502,6 +574,14 @@ class RunEngine:
             run.worktree_path = worktree_path
             run.branch_name = branch_name
             await self.session.flush()
+
+        # 5. Log worktree creation event
+        await self._add_event(
+            run_id, RunState.CREATING_WORKTREE,
+            f"Worktree created at {worktree_path}, branch {branch_name}",
+            metadata={"path": worktree_path, "branch": branch_name},
+            duration_ms=wt_ms,
+        )
 
         return worktree_path
 
@@ -529,13 +609,27 @@ class RunEngine:
             PlanArtifact with ordered implementation steps, or None if
             planning failed (run is transitioned to PLAN_FAILED).
         """
+        # Determine model for planning
+        from foundry.orchestration.model_router import resolve_model
+        plan_model = resolve_model(task_request.task_type, "planner", task_request.model_override)
+
         # Transition to PLANNING
         await self._transition(
             run_id, RunState.CREATING_WORKTREE, RunState.PLANNING, "Starting planning",
         )
 
+        # Log planning started
+        await self._add_event(
+            run_id, RunState.PLANNING,
+            "Planning started",
+            metadata={"model": plan_model},
+            model_used=plan_model,
+        )
+
         try:
+            t0 = time.monotonic()
             plan = await self.agent_runner.run_planner(task_request, worktree_path)
+            plan_ms = int((time.monotonic() - t0) * 1000)
 
             # Serialize plan to JSON, store as plan.json
             plan_json = plan.model_dump_json(indent=2)
@@ -547,9 +641,27 @@ class RunEngine:
                 result["storage_path"], result["size_bytes"], result["checksum"],
             )
 
+            # Log planning completed
+            step_count = len(plan.steps)
+            await self._add_event(
+                run_id, RunState.PLANNING,
+                f"Plan generated with {step_count} steps",
+                metadata={"artifact": "plan.json", "step_count": step_count},
+                model_used=plan_model,
+                duration_ms=plan_ms,
+            )
+
             return plan
         except Exception as e:
             logger.error("Planning failed for run %s: %s", run_id, e)
+
+            # Log planning failed
+            await self._add_event(
+                run_id, RunState.PLANNING,
+                f"Planning failed: {e}",
+                metadata={"error": str(e)},
+                model_used=plan_model,
+            )
 
             # Store error_log artifact
             error_data = json.dumps({"error": str(e), "phase": "planning"})
@@ -568,6 +680,7 @@ class RunEngine:
             await self._transition(
                 run_id, RunState.PLANNING, RunState.PLAN_FAILED,
                 f"Planning failed: {e}",
+                metadata={"error": str(e)},
             )
             return None
 
@@ -599,9 +712,22 @@ class RunEngine:
             The git diff of all changes made, or None if implementation failed
             (run is transitioned to ERRORED).
         """
+        # Determine model and language for implementation
+        from foundry.orchestration.model_router import resolve_model
+        impl_model = resolve_model(task_request.task_type, "implementer", task_request.model_override)
+        language = "go"  # Go-only for Phase 1
+
         # Transition to IMPLEMENTING
         await self._transition(
             run_id, RunState.PLANNING, RunState.IMPLEMENTING, "Starting implementation",
+        )
+
+        # Log implementation started
+        await self._add_event(
+            run_id, RunState.IMPLEMENTING,
+            "Implementation started",
+            metadata={"model": impl_model, "language": language},
+            model_used=impl_model,
         )
 
         # Set environment variables for hooks
@@ -618,17 +744,17 @@ class RunEngine:
             os.environ[key] = value
 
         try:
-            # Determine language from target paths (Go-only for Phase 1)
-            language = "go"
-
+            t0 = time.monotonic()
             diff = await self.agent_runner.run_implementer(
                 plan=plan,
                 task_request=task_request,
                 worktree_path=worktree_path,
                 language=language,
             )
+            impl_ms = int((time.monotonic() - t0) * 1000)
 
             # Store diff artifact
+            changed_files = _extract_changed_files(diff) if diff.strip() else []
             if diff.strip():
                 result = await self.artifact_store.store(
                     run_id, ArtifactType.DIFF, diff,
@@ -637,6 +763,16 @@ class RunEngine:
                     self.session, run_id, ArtifactType.DIFF.value,
                     result["storage_path"], result["size_bytes"], result["checksum"],
                 )
+
+            # Log implementation completed
+            file_count = len(changed_files)
+            await self._add_event(
+                run_id, RunState.IMPLEMENTING,
+                f"Implementation completed, {file_count} files changed",
+                metadata={"artifact": "diff.patch", "files_changed": file_count},
+                model_used=impl_model,
+                duration_ms=impl_ms,
+            )
 
             return diff
 
@@ -660,6 +796,7 @@ class RunEngine:
             await self._transition(
                 run_id, RunState.IMPLEMENTING, RunState.ERRORED,
                 f"Implementation failed: {e}",
+                metadata={"error": str(e)},
             )
             return None
 
@@ -700,10 +837,20 @@ class RunEngine:
         """
         import asyncio
 
+        # Determine check types expected
+        check_types = ["go_build", "go_vet", "go_test"]
+
         # 1. Transition to VERIFYING
         await self._transition(
             run_id, RunState.IMPLEMENTING, RunState.VERIFYING,
             "Starting verification",
+        )
+
+        # Log verification started
+        await self._add_event(
+            run_id, RunState.VERIFYING,
+            "Verification started",
+            metadata={"checks": check_types},
         )
 
         # 2. Extract changed files from stored diff artifact
@@ -756,7 +903,23 @@ class RunEngine:
             session=self.session,
         )
 
-        # 4. Serialize and store verification.json artifact
+        # 4. Log individual check results
+        for r in results:
+            status = "passed" if r.passed else "failed"
+            output_snippet = r.output[:500] if r.output else ""
+            await self._add_event(
+                run_id, RunState.VERIFYING,
+                f"{r.check_type} {status}",
+                metadata={
+                    "check_type": r.check_type,
+                    "passed": r.passed,
+                    "duration_ms": r.duration_ms,
+                    "output_snippet": output_snippet,
+                },
+                duration_ms=r.duration_ms,
+            )
+
+        # 5. Serialize and store verification.json artifact
         verification_data = json.dumps(
             [
                 {
@@ -778,11 +941,18 @@ class RunEngine:
             result["storage_path"], result["size_bytes"], result["checksum"],
         )
 
-        # 5. Handle pass/fail with state transitions and run events
+        # 6. Handle pass/fail with state transitions and run events
         if not passed:
             failed_checks = [r.check_type for r in results if not r.passed]
             error_summary = (
                 f"Verification failed: {', '.join(failed_checks)} did not pass"
+            )
+
+            # Log verification overall result
+            await self._add_event(
+                run_id, RunState.VERIFYING,
+                "Verification failed",
+                metadata={"failed_checks": failed_checks},
             )
 
             # Attach error summary to run row
@@ -798,7 +968,12 @@ class RunEngine:
             )
             return False
 
-        # All checks passed
+        # All checks passed — log overall result
+        await self._add_event(
+            run_id, RunState.VERIFYING,
+            "Verification passed",
+            metadata={"checks_passed": [r.check_type for r in results]},
+        )
         await self._transition(
             run_id, RunState.VERIFYING, RunState.VERIFICATION_PASSED,
             "All verification checks passed",
@@ -836,11 +1011,22 @@ class RunEngine:
             ReviewVerdict with verdict, issues, and summary.
         """
         from foundry.contracts.shared import ReviewVerdictType
+        from foundry.orchestration.model_router import resolve_model
+
+        review_model = resolve_model(task_request.task_type, "reviewer", task_request.model_override)
 
         # 1. Transition to REVIEWING
         await self._transition(
             run_id, RunState.VERIFICATION_PASSED, RunState.REVIEWING,
             "Starting blind review",
+        )
+
+        # Log review started
+        await self._add_event(
+            run_id, RunState.REVIEWING,
+            "Blind review started",
+            metadata={"model": review_model},
+            model_used=review_model,
         )
 
         # 2. Generate PR title and description
@@ -856,12 +1042,14 @@ class RunEngine:
         )
 
         # 3. Call reviewer (blind — no plan)
+        t0 = time.monotonic()
         review = await self.agent_runner.run_reviewer(
             diff=diff,
             pr_title=pr_title,
             pr_description=pr_description,
             changed_files=changed_files,
         )
+        review_ms = int((time.monotonic() - t0) * 1000)
 
         # 4. Serialize and store review.json artifact
         review_json = review.model_dump_json(indent=2)
@@ -874,17 +1062,20 @@ class RunEngine:
             result["storage_path"], result["size_bytes"], result["checksum"],
         )
 
-        # 5. Add run event with review summary
+        # 5. Log review completed
         issue_count = len(review.issues)
-        review_event = RunEventORM(
-            run_id=run_id,
-            state=RunState.REVIEWING.value,
-            message=(
-                f"Review complete — verdict: {review.verdict.value}, "
-                f"issues: {issue_count}, confidence: {review.confidence:.2f}"
-            ),
+        await self._add_event(
+            run_id, RunState.REVIEWING,
+            f"Review verdict: {review.verdict.value}, {issue_count} issues",
+            metadata={
+                "artifact": "review.json",
+                "verdict": review.verdict.value,
+                "issue_count": issue_count,
+                "confidence": review.confidence,
+            },
+            model_used=review_model,
+            duration_ms=review_ms,
         )
-        await run_queries.add_run_event(self.session, review_event)
 
         # 6. Handle verdict
         if review.verdict == ReviewVerdictType.REJECT:
@@ -896,18 +1087,16 @@ class RunEngine:
             await self._transition(
                 run_id, RunState.REVIEWING, RunState.REVIEW_FAILED,
                 f"Review rejected: {review.summary}",
+                metadata={"verdict": review.verdict.value, "summary": review.summary},
             )
 
         elif review.verdict == ReviewVerdictType.REQUEST_CHANGES:
-            advisory_event = RunEventORM(
-                run_id=run_id,
-                state=RunState.REVIEWING.value,
-                message=(
-                    f"Review requested changes ({issue_count} issues). "
-                    f"PR will include requested changes as comments."
-                ),
+            await self._add_event(
+                run_id, RunState.REVIEWING,
+                f"Review requested changes ({issue_count} issues). "
+                f"PR will include requested changes as comments.",
+                metadata={"verdict": review.verdict.value, "issue_count": issue_count},
             )
-            await run_queries.add_run_event(self.session, advisory_event)
 
         return review
 
@@ -989,6 +1178,7 @@ class RunEngine:
         # 1. Transition to PR_OPENED
         await self._transition(
             run_id, RunState.REVIEWING, RunState.PR_OPENED, "Opening PR",
+            metadata={"branch": task_request.base_branch},
         )
 
         # 2. Stage all changes
@@ -1050,12 +1240,13 @@ class RunEngine:
         )
 
         pr_url = pr_result["url"]
+        pr_number = pr_result["number"]
 
         # 7. Store PR metadata artifact
         pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
         pr_metadata = json.dumps({
             "url": pr_url,
-            "number": pr_result["number"],
+            "number": pr_number,
             "branch": branch_name,
             "base": task_request.base_branch,
             "title": pr_title,
@@ -1070,15 +1261,22 @@ class RunEngine:
             pr_result_meta["checksum"],
         )
 
-        # 8. Update run with PR URL
+        # 8. Log PR opened event
+        await self._add_event(
+            run_id, RunState.PR_OPENED,
+            f"PR #{pr_number} opened",
+            metadata={"url": pr_url, "number": pr_number, "artifact": "pr_metadata.json"},
+        )
+
+        # 9. Update run with PR URL
         if run:
             run.pr_url = pr_url
             await self.session.flush()
 
-        # 9. Transition to COMPLETED
+        # 10. Transition to COMPLETED
         await self._transition(
             run_id, RunState.PR_OPENED, RunState.COMPLETED,
-            f"PR opened: {pr_url}",
+            "Run completed successfully",
         )
 
         return pr_url

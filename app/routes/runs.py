@@ -75,7 +75,7 @@ async def get_run_events(
             timestamp=e.created_at,
             state=e.state,
             message=e.message,
-            metadata=e.metadata_,
+            metadata=e.metadata_ if e.metadata_ else {},
             duration_ms=e.duration_ms,
             model_used=e.model_used,
             tokens_in=e.tokens_in,
