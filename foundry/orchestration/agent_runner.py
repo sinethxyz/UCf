@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 PLANNER_TOOLS: list[str] = ["Read", "Grep", "Glob"]
 IMPLEMENTER_TOOLS: list[str] = ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
 REVIEWER_TOOLS: list[str] = []  # Reviewer has no tools — judges diff only
+MIGRATION_GUARD_TOOLS: list[str] = ["Read", "Grep", "Glob"]  # Read-only access
 
 
 class AgentRunner:
@@ -256,28 +257,44 @@ class AgentRunner:
     async def run_migration_guard(
         self,
         diff: str,
+        changed_files: list[str],
     ) -> ReviewVerdict:
         """Run the migration guard subagent for high-scrutiny review.
 
         Automatically invoked when changes touch protected paths: migrations/,
-        auth/, infra/, *.env*, docker-compose*, Dockerfile*.
+        auth/, infra/, Dockerfile*, docker-compose*, or files containing
+        secret/credential/token in their path.
+
+        Uses a dedicated system prompt focused on backwards compatibility,
+        data loss risk, rollback safety, secret exposure, permission changes,
+        and Docker security. Always routed to Opus for maximum scrutiny.
 
         Args:
             diff: The git diff to review for migration safety.
+            changed_files: List of changed file paths that triggered the guard.
 
         Returns:
             ReviewVerdict with migration-specific safety assessment.
         """
-        user_msg = f"Review this diff for migration safety:\n\n```\n{diff}\n```"
+        model = resolve_model(TaskType.MIGRATION_PLAN, "migration_guard")
+
+        user_msg = prompt_templates.build_migration_guard_user_message(
+            diff=diff,
+            changed_files=changed_files,
+        )
 
         result = await self.run_agent(
             system_prompt=prompt_templates.MIGRATION_GUARD_SYSTEM,
             user_message=user_msg,
-            tools=REVIEWER_TOOLS,
-            model="claude-opus-4-6",
+            tools=MIGRATION_GUARD_TOOLS,
+            model=model,
+            output_schema=ReviewVerdict,
         )
 
-        return ReviewVerdict.model_validate(result["response"])
+        response = result["response"]
+        if isinstance(response, ReviewVerdict):
+            return response
+        return ReviewVerdict.model_validate(response)
 
     async def run_repo_explorer(
         self,
