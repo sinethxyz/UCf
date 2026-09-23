@@ -37,7 +37,7 @@ from foundry.verification.go_verify import VerificationResult
 def sample_task_request() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix pagination bug",
         prompt="Fix the off-by-one error in search pagination",
@@ -128,7 +128,7 @@ def mock_agent_runner(sample_plan, sample_review) -> MagicMock:
 def mock_pr_creator() -> MagicMock:
     creator = MagicMock()
     creator.create_pr = AsyncMock(return_value={
-        "url": "https://github.com/sinethxyz/unicorn-app/pull/99",
+        "url": "https://github.com/example/target/pull/99",
         "number": 99,
     })
     return creator
@@ -235,7 +235,7 @@ class TestHappyPathEventLogging:
         events = await get_run_events(async_session, response.id)
         queued_event = next(e for e in events if "accepted and queued" in e.message)
         assert queued_event.metadata_["task_type"] == "bug_fix"
-        assert queued_event.metadata_["repo"] == "unicorn-app"
+        assert queued_event.metadata_["repo"] == "example/target"
 
     async def test_worktree_event_has_path_and_branch(
         self,
@@ -374,7 +374,7 @@ class TestHappyPathEventLogging:
 
         events = await get_run_events(async_session, response.id)
         pr_event = next(e for e in events if "PR #99 opened" in e.message)
-        assert pr_event.metadata_["url"] == "https://github.com/sinethxyz/unicorn-app/pull/99"
+        assert pr_event.metadata_["url"] == "https://github.com/example/target/pull/99"
         assert pr_event.metadata_["number"] == 99
         assert pr_event.metadata_["artifact"] == "pr_metadata.json"
 
