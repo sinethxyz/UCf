@@ -285,6 +285,12 @@ class RunEngine:
             RunResponse with final state and metadata.
         """
 
+        if task_request.task_type is not TaskType.BUG_FIX:
+            raise NotImplementedError(
+                "The preserved end-to-end execution lane only implements bug_fix. "
+                f"Task type {task_request.task_type.value!r} was historical scaffolding."
+            )
+
         # 1. Create a run record for direct execution, or reuse the queued
         # record created by the API/worker path.
         if run_id is None:
