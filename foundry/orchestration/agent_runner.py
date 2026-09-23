@@ -172,7 +172,24 @@ class AgentRunner:
             worktree_path=worktree_path,
         )
 
-        # Capture the diff from the worktree
+        # Mark untracked files as intent-to-add so git diff HEAD includes
+        # their full contents. Without this, a newly created file can bypass
+        # verification/review and still be committed later by git add -A.
+        prepare = await asyncio.create_subprocess_exec(
+            "git", "add", "--intent-to-add", "--all",
+            cwd=worktree_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, prepare_stderr = await prepare.communicate()
+        if prepare.returncode != 0:
+            detail = prepare_stderr.decode(errors="replace").strip()
+            raise RuntimeError(
+                f"Failed to prepare worktree diff (git add --intent-to-add): {detail}"
+            )
+
+        # git diff HEAD now covers staged, unstaged, and intent-to-add files
+        # exactly once.
         proc = await asyncio.create_subprocess_exec(
             "git", "diff", "HEAD",
             cwd=worktree_path,
@@ -180,19 +197,11 @@ class AgentRunner:
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        diff = stdout.decode(errors="replace")
+        if proc.returncode != 0:
+            detail = stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"Failed to capture worktree diff: {detail}")
 
-        # Also include staged changes
-        proc2 = await asyncio.create_subprocess_exec(
-            "git", "diff", "--cached",
-            cwd=worktree_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout2, _ = await proc2.communicate()
-        cached_diff = stdout2.decode(errors="replace")
-
-        full_diff = diff + cached_diff
+        full_diff = stdout.decode(errors="replace")
         if not full_diff.strip():
             # Try git status to see what happened
             proc3 = await asyncio.create_subprocess_exec(
