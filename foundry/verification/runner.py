@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 class VerificationRunner:
     """Dispatches verification based on changed file types.
 
-    Detects .go files -> GoVerifier, .ts/.tsx files -> TypeScriptVerifier,
-    .schema.json files -> SchemaVerifier. Runs all applicable verifiers.
+    Detects file classes and runs implemented verifiers. Historically only
+    Go verification was implemented; known-but-unimplemented file classes
+    now fail closed instead of being treated as successful verification.
     """
 
     def __init__(self) -> None:
@@ -69,28 +70,53 @@ class VerificationRunner:
             result = await self.go_verifier.verify(worktree_path)
             results.append(result)
 
-        # --- TypeScript (dispatch hook — not yet implemented) -----------
+        # --- TypeScript (declared but not implemented) ------------------
         if has_ts:
-            logger.info(
-                "TypeScript files detected — ts_verify not yet implemented, skipping"
+            logger.warning(
+                "TypeScript files detected but TypeScript verification is not implemented"
+            )
+            results.append(
+                VerificationResult(
+                    check_type="typescript",
+                    passed=False,
+                    output=(
+                        "TypeScript verification is not implemented. "
+                        "Automatic promotion is blocked for TypeScript changes."
+                    ),
+                    duration_ms=0,
+                )
             )
 
-        # --- JSON Schema (dispatch hook — not yet implemented) ----------
+        # --- JSON Schema (declared but not implemented) -----------------
         if has_schema:
-            logger.info(
-                "Schema files detected — schema_verify not yet implemented, skipping"
+            logger.warning(
+                "Schema files detected but schema verification is not implemented"
+            )
+            results.append(
+                VerificationResult(
+                    check_type="schema",
+                    passed=False,
+                    output=(
+                        "Schema verification is not implemented. "
+                        "Automatic promotion is blocked for schema changes."
+                    ),
+                    duration_ms=0,
+                )
             )
 
-        # --- Fallback when nothing ran ----------------------------------
+        # --- Fail closed when no verifier ran ----------------------------
         if not results:
             logger.warning(
-                "No applicable verifiers for changed files: %s", changed_files
+                "No applicable verifier for changed files: %s", changed_files
             )
             results.append(
                 VerificationResult(
                     check_type="none",
-                    passed=True,
-                    output="No applicable verification checks for the changed files.",
+                    passed=False,
+                    output=(
+                        "No applicable verification checks exist for these changes. "
+                        "Automatic promotion is blocked."
+                    ),
                     duration_ms=0,
                 )
             )
