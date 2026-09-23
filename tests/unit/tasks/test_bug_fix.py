@@ -16,7 +16,7 @@ def bug_fix_task() -> BugFixTask:
 def bug_task_request() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix search pagination",
         prompt="Search results show wrong page when clicking next. "
@@ -86,7 +86,7 @@ class TestGetPlanPrompt:
         """When no target paths are specified, the prompt should indicate that."""
         request = TaskRequest(
             task_type=TaskType.BUG_FIX,
-            repo="unicorn-app",
+            repo="example/target",
             title="Fix login bug",
             prompt="Users can't log in after password reset",
             target_paths=[],
