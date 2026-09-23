@@ -39,9 +39,11 @@ async def test_run_all_go_files_in_subdirs():
 
     results, passed = await runner.run_all("/fake/worktree", ["services/api/handler.go"])
 
-    assert len(results) == 1
-    assert results[0].check_type == "go"
-    assert passed is True
+    assert len(results) == 2
+    assert [r.check_type for r in results] == ["go", "typescript"]
+    assert results[0].passed is True
+    assert results[1].passed is False
+    assert passed is False
     runner.go_verifier.verify.assert_awaited_once()
 
 
@@ -63,7 +65,7 @@ async def test_run_all_go_failure_propagates():
 
 
 async def test_run_all_no_matching_files():
-    """When no known file types are present, a 'none' result is returned."""
+    """Unknown file types fail closed instead of silently passing."""
     runner = VerificationRunner()
     runner.go_verifier.verify = AsyncMock()
 
@@ -71,9 +73,9 @@ async def test_run_all_no_matching_files():
 
     assert len(results) == 1
     assert results[0].check_type == "none"
-    assert results[0].passed is True
+    assert results[0].passed is False
     assert results[0].duration_ms == 0
-    assert passed is True
+    assert passed is False
     runner.go_verifier.verify.assert_not_awaited()
 
 
@@ -86,8 +88,8 @@ async def test_run_all_empty_changed_files():
 
     assert len(results) == 1
     assert results[0].check_type == "none"
-    assert results[0].passed is True
-    assert passed is True
+    assert results[0].passed is False
+    assert passed is False
     runner.go_verifier.verify.assert_not_awaited()
 
 
@@ -112,35 +114,36 @@ async def test_run_all_mixed_go_and_non_go():
     runner.go_verifier.verify.assert_awaited_once()
 
 
-async def test_run_all_ts_files_deferred():
-    """.ts files don't trigger any verifier — dispatch hook only."""
+async def test_run_all_ts_files_block_promotion():
+    """TypeScript changes fail closed until the verifier is implemented."""
     runner = VerificationRunner()
     runner.go_verifier.verify = AsyncMock()
 
     results, passed = await runner.run_all("/fake/worktree", ["component.ts", "page.tsx"])
 
-    # TS verifier is deferred, so we get the 'none' fallback
     assert len(results) == 1
-    assert results[0].check_type == "none"
-    assert passed is True
+    assert results[0].check_type == "typescript"
+    assert results[0].passed is False
+    assert passed is False
     runner.go_verifier.verify.assert_not_awaited()
 
 
-async def test_run_all_schema_files_deferred():
-    """.schema.json files don't trigger any verifier — dispatch hook only."""
+async def test_run_all_schema_files_block_promotion():
+    """Schema changes fail closed until the verifier is implemented."""
     runner = VerificationRunner()
     runner.go_verifier.verify = AsyncMock()
 
     results, passed = await runner.run_all("/fake/worktree", ["event.schema.json"])
 
     assert len(results) == 1
-    assert results[0].check_type == "none"
-    assert passed is True
+    assert results[0].check_type == "schema"
+    assert results[0].passed is False
+    assert passed is False
     runner.go_verifier.verify.assert_not_awaited()
 
 
 async def test_run_all_mixed_go_and_ts():
-    """When both .go and .ts files are present, only Go verifier runs (TS deferred)."""
+    """A passing Go check cannot hide an unverified TypeScript change."""
     runner = VerificationRunner()
     runner.go_verifier.verify = AsyncMock(return_value=_go_result(True))
 
@@ -195,13 +198,13 @@ async def test_run_all_overall_passed_false():
     assert passed is False
 
 
-async def test_run_all_no_verifiers_overall_passed():
-    """When no verifiers run, overall_passed is True (none result passes)."""
+async def test_run_all_no_verifiers_overall_fails_closed():
+    """When no verifier applies, overall_passed is False."""
     runner = VerificationRunner()
 
     _, passed = await runner.run_all("/fake/worktree", ["README.md"])
 
-    assert passed is True
+    assert passed is False
 
 
 # ---------------------------------------------------------------------------
