@@ -17,7 +17,10 @@ class TaskRequest(FoundryBaseModel):
     """A task submitted to Foundry for execution."""
 
     task_type: TaskType
-    repo: Literal["unicorn-app", "unicorn-foundry"]
+    repo: str = Field(
+        min_length=3,
+        description="Explicit GitHub repository in owner/name form for PR targeting.",
+    )
     base_branch: str = "main"
     title: str
     prompt: str
