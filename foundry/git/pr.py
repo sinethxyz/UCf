@@ -1,7 +1,7 @@
-"""PR creation via GitHub API.
+"""Pull-request creation for the preserved software-change run path.
 
-Opens pull requests with structured body, labels, and artifact links
-following Foundry PR standards defined in .claude/rules/pr-standards.md.
+The historical private repository alias map was removed during public-release
+sanitization. Public code requires an explicit GitHub owner/name target.
 """
 
 import logging
@@ -13,11 +13,6 @@ from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.providers.github import GitHubClient
 
 logger = logging.getLogger(__name__)
-
-# GitHub repo for unicorn-app PRs
-UNICORN_APP_REPO = "sinethxyz/unicorn-app"
-UNICORN_FOUNDRY_REPO = "sinethxyz/ucf"
-
 
 def _build_pr_title(task_request: TaskRequest) -> str:
     """Build PR title following Foundry standards.
@@ -134,10 +129,19 @@ def _task_type_label(task_request: TaskRequest) -> str:
 
 
 def _repo_slug(task_request: TaskRequest) -> str:
-    """Determine the GitHub repo slug from the task request."""
-    if task_request.repo == "unicorn-app":
-        return UNICORN_APP_REPO
-    return UNICORN_FOUNDRY_REPO
+    """Return an explicit GitHub owner/name target.
+
+    Historical alias routing was intentionally removed because it coupled the
+    public artifact to private repository names and could silently target the
+    wrong repository.
+    """
+    repo = task_request.repo.strip()
+    parts = repo.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError(
+            "TaskRequest.repo must be an explicit GitHub repository in owner/name form"
+        )
+    return repo
 
 
 class PRCreator:
