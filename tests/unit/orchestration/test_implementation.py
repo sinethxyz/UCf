@@ -181,11 +181,10 @@ class TestRunImplementer:
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             # Mock git diff HEAD
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"diff output", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
             mock_proc.returncode = 0
-            # Second call for git diff --cached
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"diff output", b""))
             mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
@@ -220,9 +219,11 @@ class TestRunImplementer:
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
             await runner.run_implementer(
@@ -254,9 +255,11 @@ class TestRunImplementer:
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
             await runner.run_implementer(
@@ -288,9 +291,11 @@ class TestRunImplementer:
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
             await runner.run_implementer(
@@ -322,9 +327,11 @@ class TestRunImplementer:
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
             await runner.run_implementer(
@@ -356,9 +363,11 @@ class TestRunImplementer:
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"diff", b""))
+            mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
             await runner.run_implementer(
@@ -379,7 +388,7 @@ class TestRunImplementer:
         sample_plan_artifact: PlanArtifact,
         sample_task_request: TaskRequest,
     ):
-        """run_implementer captures combined unstaged + staged diff."""
+        """run_implementer captures one complete HEAD diff after intent-to-add."""
         runner.provider = MagicMock()
         runner.provider.run = AsyncMock(return_value={
             "response": {},
@@ -392,9 +401,11 @@ class TestRunImplementer:
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b"unstaged diff\n", b""))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
             mock_proc2 = AsyncMock()
-            mock_proc2.communicate = AsyncMock(return_value=(b"staged diff\n", b""))
+            mock_proc2.communicate = AsyncMock(return_value=(b"complete diff\n", b""))
+            mock_proc2.returncode = 0
             mock_exec.side_effect = [mock_proc, mock_proc2]
 
             diff = await runner.run_implementer(
@@ -404,8 +415,7 @@ class TestRunImplementer:
                 language="go",
             )
 
-        assert "unstaged diff" in diff
-        assert "staged diff" in diff
+        assert "complete diff" in diff
 
     async def test_run_implementer_returns_empty_string_when_no_changes(
         self,
@@ -427,8 +437,10 @@ class TestRunImplementer:
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc1 = AsyncMock()
             mock_proc1.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc1.returncode = 0
             mock_proc2 = AsyncMock()
             mock_proc2.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc2.returncode = 0
             # Third call for git status --porcelain
             mock_proc3 = AsyncMock()
             mock_proc3.communicate = AsyncMock(return_value=(b"", b""))
