@@ -32,7 +32,7 @@ from foundry.git.pr import (
 def task_request() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix pagination bug",
         prompt="Fix the off-by-one error in search pagination",
@@ -108,7 +108,7 @@ class TestBuildPrTitle:
     def test_endpoint_build_task_type(self):
         req = TaskRequest(
             task_type=TaskType.ENDPOINT_BUILD,
-            repo="unicorn-app",
+            repo="example/target",
             title="Add company timeline endpoint",
             prompt="Build GET /v1/companies/{id}/timeline",
         )
@@ -117,7 +117,7 @@ class TestBuildPrTitle:
     def test_refactor_task_type(self):
         req = TaskRequest(
             task_type=TaskType.REFACTOR,
-            repo="unicorn-foundry",
+            repo="example/control",
             title="Extract event normalization",
             prompt="Refactor event normalization into shared module",
         )
@@ -242,7 +242,7 @@ class TestBuildPrBody:
     ):
         req = TaskRequest(
             task_type=TaskType.BUG_FIX,
-            repo="unicorn-app",
+            repo="example/target",
             title="Fix bug",
             prompt="x" * 1000,
         )
@@ -282,38 +282,38 @@ class TestBuildPrBody:
 class TestHelpers:
     def test_task_type_label_bug_fix(self):
         req = TaskRequest(
-            task_type=TaskType.BUG_FIX, repo="unicorn-app",
+            task_type=TaskType.BUG_FIX, repo="example/target",
             title="t", prompt="p",
         )
         assert _task_type_label(req) == "bug-fix"
 
     def test_task_type_label_endpoint_build(self):
         req = TaskRequest(
-            task_type=TaskType.ENDPOINT_BUILD, repo="unicorn-app",
+            task_type=TaskType.ENDPOINT_BUILD, repo="example/target",
             title="t", prompt="p",
         )
         assert _task_type_label(req) == "endpoint-build"
 
     def test_task_type_label_extraction_batch(self):
         req = TaskRequest(
-            task_type=TaskType.EXTRACTION_BATCH, repo="unicorn-app",
+            task_type=TaskType.EXTRACTION_BATCH, repo="example/target",
             title="t", prompt="p",
         )
         assert _task_type_label(req) == "extraction-batch"
 
     def test_repo_slug_unicorn_app(self):
         req = TaskRequest(
-            task_type=TaskType.BUG_FIX, repo="unicorn-app",
+            task_type=TaskType.BUG_FIX, repo="example/target",
             title="t", prompt="p",
         )
-        assert _repo_slug(req) == "sinethxyz/unicorn-app"
+        assert _repo_slug(req) == "example/target"
 
     def test_repo_slug_unicorn_foundry(self):
         req = TaskRequest(
-            task_type=TaskType.BUG_FIX, repo="unicorn-foundry",
+            task_type=TaskType.BUG_FIX, repo="example/control",
             title="t", prompt="p",
         )
-        assert _repo_slug(req) == "sinethxyz/ucf"
+        assert _repo_slug(req) == "example/control"
 
 
 # ---------------------------------------------------------------------------
@@ -327,9 +327,9 @@ class TestPRCreatorCreatePr:
         creator = PRCreator(token="test-token")
         creator.client = MagicMock()
         creator.client.create_pull_request = AsyncMock(return_value={
-            "url": "https://github.com/sinethxyz/unicorn-app/pull/42",
+            "url": "https://github.com/example/target/pull/42",
             "number": 42,
-            "html_url": "https://github.com/sinethxyz/unicorn-app/pull/42",
+            "html_url": "https://github.com/example/target/pull/42",
         })
         creator.client.add_pr_labels = AsyncMock()
         return creator
@@ -351,7 +351,7 @@ class TestPRCreatorCreatePr:
 
         pr_creator.client.create_pull_request.assert_called_once()
         call_kwargs = pr_creator.client.create_pull_request.call_args.kwargs
-        assert call_kwargs["repo"] == "sinethxyz/unicorn-app"
+        assert call_kwargs["repo"] == "example/target"
         assert call_kwargs["head"] == "foundry/bug-fix-pagination"
         assert call_kwargs["base"] == "main"
         assert "[Foundry] bug_fix: Fix pagination bug" in call_kwargs["title"]
@@ -370,7 +370,7 @@ class TestPRCreatorCreatePr:
             base_branch="main",
         )
 
-        assert result["url"] == "https://github.com/sinethxyz/unicorn-app/pull/42"
+        assert result["url"] == "https://github.com/example/target/pull/42"
         assert result["number"] == 42
 
     async def test_create_pr_applies_standard_labels(
@@ -436,14 +436,14 @@ class TestPRCreatorCreatePr:
             base_branch="main",
         )
 
-        assert result["url"] == "https://github.com/sinethxyz/unicorn-app/pull/42"
+        assert result["url"] == "https://github.com/example/target/pull/42"
 
     async def test_create_pr_uses_foundry_repo_for_foundry_tasks(
         self, pr_creator, plan_artifact, review_verdict,
     ):
         req = TaskRequest(
             task_type=TaskType.REFACTOR,
-            repo="unicorn-foundry",
+            repo="example/control",
             title="Refactor thing",
             prompt="Refactor the thing",
         )
@@ -459,14 +459,14 @@ class TestPRCreatorCreatePr:
         )
 
         call_kwargs = pr_creator.client.create_pull_request.call_args.kwargs
-        assert call_kwargs["repo"] == "sinethxyz/ucf"
+        assert call_kwargs["repo"] == "example/control"
 
     async def test_create_pr_endpoint_build_label(
         self, pr_creator, plan_artifact, review_verdict,
     ):
         req = TaskRequest(
             task_type=TaskType.ENDPOINT_BUILD,
-            repo="unicorn-app",
+            repo="example/target",
             title="Add timeline endpoint",
             prompt="Build the timeline",
         )
@@ -496,10 +496,10 @@ class TestPRCreatorDelegation:
         creator.client = MagicMock()
         creator.client.add_pr_comment = AsyncMock()
 
-        await creator.add_comment("sinethxyz/unicorn-app", 42, "LGTM")
+        await creator.add_comment("example/target", 42, "LGTM")
 
         creator.client.add_pr_comment.assert_called_once_with(
-            "sinethxyz/unicorn-app", 42, "LGTM",
+            "example/target", 42, "LGTM",
         )
 
     async def test_add_labels_delegates_to_client(self):
@@ -507,8 +507,8 @@ class TestPRCreatorDelegation:
         creator.client = MagicMock()
         creator.client.add_pr_labels = AsyncMock()
 
-        await creator.add_labels("sinethxyz/unicorn-app", 42, ["urgent"])
+        await creator.add_labels("example/target", 42, ["urgent"])
 
         creator.client.add_pr_labels.assert_called_once_with(
-            "sinethxyz/unicorn-app", 42, ["urgent"],
+            "example/target", 42, ["urgent"],
         )
