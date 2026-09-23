@@ -214,7 +214,7 @@ def artifact_store(tmp_path: Path) -> ArtifactStore:
 def bug_fix_task() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix auth token validation",
         prompt="Fix the token validation bug in auth middleware",
@@ -227,7 +227,7 @@ def bug_fix_task() -> TaskRequest:
 def migration_task() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.MIGRATION_PLAN,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Add signals table",
         prompt="Create the signals table for event tracking",
@@ -240,7 +240,7 @@ def migration_task() -> TaskRequest:
 def endpoint_task() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.ENDPOINT_BUILD,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Add company timeline endpoint",
         prompt="Build GET /v1/companies/{id}/timeline",
@@ -253,7 +253,7 @@ def endpoint_task() -> TaskRequest:
 def refactor_task() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.REFACTOR,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Refactor auth module",
         prompt="Extract shared auth logic into middleware",
@@ -267,7 +267,7 @@ def extraction_task() -> TaskRequest:
     """Task type that is NOT authorized for protected path changes."""
     return TaskRequest(
         task_type=TaskType.EXTRACTION_BATCH,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Extract funding signals",
         prompt="Extract funding round data from press releases",
@@ -615,7 +615,7 @@ class TestAllowedTaskTypeEscalation:
     ):
         task = TaskRequest(
             task_type=TaskType.CANON_UPDATE,
-            repo="unicorn-app",
+            repo="example/target",
             base_branch="main",
             title="Update event schema",
             prompt="Add new event fields",
