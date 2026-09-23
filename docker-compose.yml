@@ -1,3 +1,6 @@
+# Historical development harness.
+# This starts the API and its backing services only. The original worker
+# processes were incomplete and are intentionally not advertised as runnable.
 services:
   postgres:
     image: postgres:16-alpine
@@ -22,36 +25,7 @@ services:
     environment:
       FOUNDRY_DATABASE_URL: postgresql+asyncpg://foundry:foundry@postgres:5432/foundry
       FOUNDRY_REDIS_URL: redis://redis:6379/0
-      FOUNDRY_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      FOUNDRY_GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-    depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ./artifacts:/app/artifacts
-      - worktrees:/tmp/foundry-worktrees
-
-  run_worker:
-    build: .
-    command: ["python", "workers/run_worker.py"]
-    environment:
-      FOUNDRY_DATABASE_URL: postgresql+asyncpg://foundry:foundry@postgres:5432/foundry
-      FOUNDRY_REDIS_URL: redis://redis:6379/0
-      FOUNDRY_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      FOUNDRY_GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-    depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ./artifacts:/app/artifacts
-      - worktrees:/tmp/foundry-worktrees
-
-  batch_worker:
-    build: .
-    command: ["python", "workers/batch_worker.py"]
-    environment:
-      FOUNDRY_DATABASE_URL: postgresql+asyncpg://foundry:foundry@postgres:5432/foundry
-      FOUNDRY_REDIS_URL: redis://redis:6379/0
+      FOUNDRY_OBJECT_STORAGE_BUCKET: /app/artifacts
       FOUNDRY_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FOUNDRY_GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
