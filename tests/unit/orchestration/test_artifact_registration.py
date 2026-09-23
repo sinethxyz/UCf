@@ -52,7 +52,7 @@ diff --git a/services/api/search/handler.go b/services/api/search/handler.go
 def sample_task_request() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix pagination bug",
         prompt="Fix the off-by-one error in search pagination",
@@ -115,7 +115,7 @@ def mock_agent_runner(sample_plan, sample_review) -> MagicMock:
 def mock_pr_creator() -> MagicMock:
     creator = MagicMock()
     creator.create_pr = AsyncMock(return_value={
-        "url": "https://github.com/sinethxyz/unicorn-app/pull/42",
+        "url": "https://github.com/example/target/pull/42",
         "number": 42,
     })
     return creator
