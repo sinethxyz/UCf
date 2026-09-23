@@ -64,12 +64,17 @@ async def get_run_engine(
 ) -> RunEngine:
     """Build a RunEngine with all dependencies injected."""
     settings = get_settings()
+    if not settings.target_repo_slug:
+        raise RuntimeError(
+            "FOUNDRY_TARGET_REPO_SLUG is required before execution is enabled"
+        )
     return RunEngine(
         session=session,
         artifact_store=get_artifact_store(),
         worktree_manager=WorktreeManager(
-            repo_path=".",
+            repo_path=settings.target_repo_path,
             worktree_base=settings.worktree_base_path,
+            expected_repo=settings.target_repo_slug,
         ),
         agent_runner=AgentRunner(),
         pr_creator=PRCreator(),
