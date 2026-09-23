@@ -62,7 +62,7 @@ class TestWorktreeCreate:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
-            result = await manager.create("unicorn-app", branch, run_id)
+            result = await manager.create("example/target", branch, run_id)
 
         # Verify git command
         mock_exec.assert_called_once()
@@ -86,7 +86,7 @@ class TestWorktreeCreate:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
             await manager.create(
-                "unicorn-app",
+                "example/target",
                 branch,
                 run_id,
                 base_ref="release-branch",
@@ -103,7 +103,7 @@ class TestWorktreeCreate:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await manager.create("unicorn-app", "foundry/test", run_id)
+            result = await manager.create("example/target", "foundry/test", run_id)
 
         expected = str(Path(manager.worktree_base) / str(run_id))
         assert result == expected
@@ -116,7 +116,7 @@ class TestWorktreeCreate:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            await manager.create("unicorn-app", "foundry/test", run_id)
+            await manager.create("example/target", "foundry/test", run_id)
 
         # The parent directory (worktree_base) should have been created
         assert Path(manager.worktree_base).exists()
@@ -132,7 +132,7 @@ class TestWorktreeCreate:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             with pytest.raises(RuntimeError, match="Failed to create worktree"):
-                await manager.create("unicorn-app", "foundry/test", run_id)
+                await manager.create("example/target", "foundry/test", run_id)
 
     async def test_create_sets_cwd_to_repo_path(self, manager: WorktreeManager):
         run_id = uuid4()
@@ -142,7 +142,7 @@ class TestWorktreeCreate:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
-            await manager.create("unicorn-app", "foundry/test", run_id)
+            await manager.create("example/target", "foundry/test", run_id)
 
         kwargs = mock_exec.call_args[1]
         assert kwargs["cwd"] == str(manager.repo_path)
