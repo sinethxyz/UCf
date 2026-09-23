@@ -1317,70 +1317,43 @@ class RunEngine:
         review: ReviewVerdict,
         diff: str,
     ) -> str:
-        """Open a pull request with the changes from the worktree.
+        """Commit, push, and open a pull request for a reviewed run.
 
-        Handles the full PR opening lifecycle:
-        1. Transition to PR_OPENED state.
-        2. Stage and commit all changes in the worktree.
-        3. Push the branch to the remote.
-        4. Delegate PR creation to pr_creator with all collected artifacts.
-        5. Store pr_metadata.json artifact with URL and number.
-        6. Update run record with pr_url.
-        7. Transition to COMPLETED state.
-
-        Args:
-            run_id: ID of the current run.
-            task_request: Original task request.
-            worktree_path: Path to the worktree with changes.
-            plan: The plan artifact for inclusion in PR body.
-            review: The review verdict for inclusion in PR body.
-            diff: The git diff of all changes.
-
-        Returns:
-            URL of the opened pull request.
+        Git operations are completed successfully before the run is marked
+        PR_OPENED. A failed stage/commit/push leaves the run in REVIEWING so
+        the outer lifecycle can transition it to ERRORED rather than recording
+        a pull request that never existed.
         """
         import asyncio
 
-        # 1. Transition to PR_OPENED
-        await self._transition(
-            run_id, RunState.REVIEWING, RunState.PR_OPENED, "Opening PR",
-            metadata={"branch": task_request.base_branch},
-        )
+        async def _run_git(*args: str) -> tuple[bytes, bytes]:
+            proc = await asyncio.create_subprocess_exec(
+                "git", *args,
+                cwd=worktree_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                detail = stderr.decode(errors="replace").strip()
+                raise RuntimeError(
+                    f"git {' '.join(args)} failed with exit code {proc.returncode}: {detail}"
+                )
+            return stdout, stderr
 
-        # 2. Stage all changes
-        proc = await asyncio.create_subprocess_exec(
-            "git", "add", "-A",
-            cwd=worktree_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate()
-
-        # 3. Commit
+        # 1. Stage and commit the exact worktree contents.
+        await _run_git("add", "-A")
         commit_msg = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
-        proc = await asyncio.create_subprocess_exec(
-            "git", "commit", "-m", commit_msg,
-            cwd=worktree_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate()
+        await _run_git("commit", "-m", commit_msg)
 
-        # 4. Push branch
+        # 2. Push the branch. A push failure must block PR creation.
         run = await run_queries.get_run(self.session, run_id)
-        branch_name = run.branch_name if run else "unknown"
+        branch_name = run.branch_name if run else None
+        if not branch_name:
+            raise RuntimeError(f"Run {run_id} has no branch_name for PR creation")
+        await _run_git("push", "-u", "origin", branch_name)
 
-        proc = await asyncio.create_subprocess_exec(
-            "git", "push", "-u", "origin", branch_name,
-            cwd=worktree_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            logger.warning("Git push stderr: %s", stderr.decode())
-
-        # 5. Load verification results from stored artifact (if available)
+        # 3. Load verification results from the stored artifact when present.
         verification_results: list[dict] = []
         try:
             artifact_entries = await self.artifact_store.list_artifacts(run_id)
@@ -1393,7 +1366,7 @@ class RunEngine:
         except Exception:
             logger.debug("Could not load verification artifact for PR body")
 
-        # 6. Create PR via pr_creator with all collected artifacts
+        # 4. Create the GitHub PR.
         pr_result = await self.pr_creator.create_pr(
             task_request=task_request,
             plan=plan,
@@ -1404,11 +1377,10 @@ class RunEngine:
             branch_name=branch_name,
             base_branch=task_request.base_branch,
         )
-
         pr_url = pr_result["url"]
         pr_number = pr_result["number"]
 
-        # 7. Store PR metadata artifact
+        # 5. Persist PR metadata and URL before recording PR_OPENED.
         pr_title = f"[Foundry] {task_request.task_type.value}: {task_request.title}"
         pr_metadata = json.dumps({
             "url": pr_url,
@@ -1427,22 +1399,19 @@ class RunEngine:
             pr_result_meta["checksum"],
         )
 
-        # 8. Log PR opened event
-        await self._add_event(
-            run_id, RunState.PR_OPENED,
-            f"PR #{pr_number} opened",
-            metadata={"url": pr_url, "number": pr_number, "artifact": "pr_metadata.json"},
-        )
-
-        # 9. Update run with PR URL
+        run = await run_queries.get_run(self.session, run_id)
         if run:
             run.pr_url = pr_url
             await self.session.flush()
 
-        # 10. Transition to COMPLETED
+        # 6. Only now does PR_OPENED describe reality.
+        await self._transition(
+            run_id, RunState.REVIEWING, RunState.PR_OPENED,
+            f"PR #{pr_number} opened",
+            metadata={"url": pr_url, "number": pr_number, "branch": branch_name},
+        )
         await self._transition(
             run_id, RunState.PR_OPENED, RunState.COMPLETED,
             "Run completed successfully",
         )
-
         return pr_url
