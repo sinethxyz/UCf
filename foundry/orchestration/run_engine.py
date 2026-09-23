@@ -1165,6 +1165,7 @@ class RunEngine:
             pr_title=pr_title,
             pr_description=pr_description,
             changed_files=changed_files,
+            model_override=task_request.model_override,
         )
         review_ms = int((time.monotonic() - t0) * 1000)
 
