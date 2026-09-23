@@ -152,9 +152,11 @@ async def test_run_all_mixed_go_and_ts():
         ["handler.go", "page.tsx", "component.ts"],
     )
 
-    assert len(results) == 1
-    assert results[0].check_type == "go"
-    assert passed is True
+    assert len(results) == 2
+    assert [r.check_type for r in results] == ["go", "typescript"]
+    assert results[0].passed is True
+    assert results[1].passed is False
+    assert passed is False
     runner.go_verifier.verify.assert_awaited_once()
 
 
