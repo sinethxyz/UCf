@@ -76,6 +76,25 @@ class TestWorktreeCreate:
         assert str(run_id) in cmd[5]  # worktree path contains run_id
         assert cmd[6] == "HEAD"
 
+    async def test_create_uses_requested_base_ref(self, manager: WorktreeManager):
+        run_id = uuid.uuid4()
+        branch = "foundry/bug-fix-pagination"
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await manager.create(
+                "unicorn-app",
+                branch,
+                run_id,
+                base_ref="release-branch",
+            )
+
+        cmd = mock_exec.call_args.args
+        assert cmd[6] == "release-branch"
+
     async def test_create_returns_worktree_path(self, manager: WorktreeManager):
         run_id = uuid4()
 
