@@ -14,9 +14,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     github_token: str = ""
     anthropic_api_key: str = ""
-    object_storage_bucket: str = "unicorn-foundry-artifacts"
+    object_storage_bucket: str = "artifacts"
     foundry_db_url: str = "postgresql+asyncpg://foundry:foundry@localhost:5432/foundry"
-    unicorn_app_internal_url: str = "http://localhost:8080"
     max_concurrent_runs: int = 5
     max_retries_per_run: int = 3
     worktree_base_path: str = "/tmp/foundry-worktrees"
