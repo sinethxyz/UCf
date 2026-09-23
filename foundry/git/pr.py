@@ -35,21 +35,21 @@ def _build_pr_body(
     Sections: Summary, Plan, Changes, Verification Results,
     Review Verdict, Artifacts, Run Metadata.
     """
-    # Summary
-    summary = task_request.prompt[:500]
+    # Do not copy the raw task prompt or model-generated rationales into a
+    # remote PR. They may contain internal context that is appropriate for the
+    # local run artifact but not for an external GitHub surface.
+    summary = task_request.title
 
-    # Plan section
-    risks = ", ".join(plan.risks) if plan.risks else "None identified"
+    # Plan section: publish only structural metadata.
     plan_section = (
         f"Complexity: {plan.estimated_complexity.value}\n"
-        f"Steps: {len(plan.steps)}\n"
-        f"Risks: {risks}"
+        f"Steps: {len(plan.steps)}"
     )
 
-    # Changes section
+    # Changes section: file/action only; rationale remains in local artifacts.
     changes_lines = []
     for step in plan.steps:
-        changes_lines.append(f"- `{step.file_path}`: {step.action} — {step.rationale}")
+        changes_lines.append(f"- `{step.file_path}`: {step.action}")
     changes_section = "\n".join(changes_lines) if changes_lines else "No changes listed."
 
     # Verification section
