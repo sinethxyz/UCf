@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import Settings
 from app.deps import set_session_factory
-from app.routes import batches, evals, health, patches, reviews, runs, specs, worktrees
+from app.routes import health, patches, reviews, runs, specs, worktrees
 
 
 @asynccontextmanager
@@ -39,8 +39,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title="Unicorn Foundry",
-        description="Internal orchestration API for Unicorn Protocol.",
+        title="Unified Control Fabric",
+        description="Historical control-plane API for inspected software-change runs.",
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -66,8 +66,6 @@ def create_app() -> FastAPI:
     app.include_router(reviews.router, prefix="/v1", tags=["reviews"])
     app.include_router(specs.router, prefix="/v1", tags=["specs"])
     app.include_router(patches.router, prefix="/v1", tags=["patches"])
-    app.include_router(batches.router, prefix="/v1", tags=["batches"])
-    app.include_router(evals.router, prefix="/v1", tags=["evals"])
     app.include_router(worktrees.router, prefix="/v1", tags=["worktrees"])
 
     return app
