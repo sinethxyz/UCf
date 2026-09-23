@@ -134,7 +134,7 @@ async def _create_run(session: AsyncSession, **overrides) -> Run:
     """Insert a Run row and return it."""
     defaults = {
         "task_type": "bug_fix",
-        "repo": "unicorn-app",
+        "repo": "example/target",
         "base_branch": "main",
         "title": "Test run",
         "prompt": "Fix the bug",
