@@ -53,7 +53,7 @@ def sample_task_request() -> TaskRequest:
     """Return a minimal valid TaskRequest for testing."""
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix pagination bug",
         prompt="Fix the off-by-one error in search pagination",
