@@ -23,7 +23,7 @@ from foundry.contracts.shared import (
     TaskType,
 )
 from foundry.contracts.task_types import PlanArtifact, PlanStep, TaskRequest
-from foundry.db.queries.runs import create_run, get_run, get_run_events
+from foundry.db.queries.runs import create_run, get_run, get_run_events, list_runs
 from foundry.orchestration.run_engine import RunEngine
 from foundry.storage.artifact_store import ArtifactStore, ArtifactType
 from foundry.verification.go_verify import VerificationResult
@@ -178,6 +178,26 @@ def run_engine(
 
 
 class TestExecuteRunHappyPath:
+    async def test_existing_queued_run_is_reused(
+        self,
+        run_engine: RunEngine,
+        sample_task_request: TaskRequest,
+        async_session: AsyncSession,
+    ):
+        """Worker execution must not create a second run record."""
+        queued = await create_run(async_session, sample_task_request)
+        await async_session.flush()
+
+        with patch("asyncio.create_subprocess_exec", return_value=_make_git_mock()):
+            response = await run_engine.execute_run(
+                sample_task_request,
+                run_id=queued.id,
+            )
+
+        assert response.id == queued.id
+        runs = await list_runs(async_session, limit=20, offset=0)
+        assert len(runs) == 1
+
     async def test_happy_path_reaches_completed(
         self,
         run_engine: RunEngine,
