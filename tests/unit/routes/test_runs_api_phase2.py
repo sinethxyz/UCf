@@ -516,6 +516,27 @@ class TestGetRunVerification:
         assert body["passed"] is True
         assert len(body["checks"]) == 1
 
+    async def test_empty_verification_artifact_fails_closed(
+        self, client, db_session, mock_artifact_store
+    ):
+        run = await _create_run(db_session, state="verification_failed")
+        artifact = RunArtifactORM(
+            run_id=run.id,
+            artifact_type="verification",
+            storage_path=f"runs/{run.id}/verification.json",
+            size_bytes=2,
+            checksum="0" * 64,
+        )
+        db_session.add(artifact)
+        await db_session.flush()
+        mock_artifact_store.retrieve.return_value = b"[]"
+
+        resp = await client.get(f"/v1/runs/{run.id}/verification")
+
+        assert resp.status_code == 200
+        assert resp.json()["passed"] is False
+        assert resp.json()["checks"] == []
+
     async def test_verification_not_reached_returns_404(self, client, db_session):
         """Run exists but has no verification artifact yet."""
         run = await _create_run(db_session, state="planning")
