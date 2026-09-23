@@ -233,7 +233,9 @@ async def get_run_verification(
     else:
         checks_raw = data.get("checks", [])
 
-    all_passed = all(c.get("passed", False) for c in checks_raw)
+    all_passed = bool(checks_raw) and all(
+        c.get("passed", False) for c in checks_raw
+    )
     checks = [
         VerificationCheckResult(
             check_type=c.get("check_type", "unknown"),
