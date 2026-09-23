@@ -76,6 +76,20 @@ class TestWorktreeCreate:
         assert str(run_id) in cmd[5]  # worktree path contains run_id
         assert cmd[6] == "HEAD"
 
+    async def test_create_rejects_repository_mismatch(self, tmp_path: Path):
+        manager = WorktreeManager(
+            repo_path="/tmp/repo",
+            worktree_base=str(tmp_path / "worktrees"),
+            expected_repo="example/target",
+        )
+
+        with pytest.raises(ValueError, match="does not match configured worktree repo"):
+            await manager.create(
+                "example/other",
+                "foundry/bug-fix",
+                uuid.uuid4(),
+            )
+
     async def test_create_uses_requested_base_ref(self, manager: WorktreeManager):
         run_id = uuid.uuid4()
         branch = "foundry/bug-fix-pagination"
