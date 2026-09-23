@@ -107,7 +107,9 @@ class AgentRunner:
         Returns:
             Validated PlanArtifact.
         """
-        model = resolve_model(task_request.task_type, "planner")
+        model = resolve_model(
+            task_request.task_type, "planner", task_request.model_override
+        )
         user_msg = prompt_templates.build_planner_user_message(
             task_id=str(task_request.metadata.get("run_id", "unknown")),
             task_type=task_request.task_type.value,
@@ -157,7 +159,9 @@ class AgentRunner:
         else:
             system_prompt = prompt_templates.FRONTEND_IMPLEMENTER_SYSTEM
 
-        model = resolve_model(task_request.task_type, "implementer")
+        model = resolve_model(
+            task_request.task_type, "implementer", task_request.model_override
+        )
         plan_json = plan.model_dump_json(indent=2)
         user_msg = prompt_templates.build_implementer_user_message(
             plan_json=plan_json,
@@ -220,6 +224,7 @@ class AgentRunner:
         pr_title: str,
         pr_description: str,
         changed_files: list[str] | None = None,
+        model_override: str | None = None,
     ) -> ReviewVerdict:
         """Run the reviewer subagent to independently review a diff.
 
@@ -237,7 +242,9 @@ class AgentRunner:
         Returns:
             ReviewVerdict with verdict, issues list, summary, and confidence.
         """
-        model = resolve_model(TaskType.REVIEW_DIFF, "reviewer")
+        model = resolve_model(
+            TaskType.REVIEW_DIFF, "reviewer", model_override
+        )
 
         user_msg = prompt_templates.build_reviewer_user_message(
             pr_title=pr_title,
