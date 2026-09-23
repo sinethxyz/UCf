@@ -138,7 +138,7 @@ class TestBuildPrBody:
             SAMPLE_VERIFICATION_RESULTS, review_verdict, uuid4(),
         )
         assert "## Summary" in body
-        assert "off-by-one" in body
+        assert "Fix pagination bug" in body
 
     def test_body_contains_plan_section(
         self, task_request, plan_artifact, review_verdict,
@@ -150,7 +150,7 @@ class TestBuildPrBody:
         assert "## Plan" in body
         assert "Complexity: small" in body
         assert "Steps: 2" in body
-        assert "Might affect other pagination endpoints" in body
+        assert "Might affect other pagination endpoints" not in body
 
     def test_body_contains_changes_section(
         self, task_request, plan_artifact, review_verdict,
@@ -162,7 +162,7 @@ class TestBuildPrBody:
         assert "## Changes" in body
         assert "`services/api/search/handler.go`" in body
         assert "modify" in body
-        assert "Fix off-by-one" in body
+        assert "Fix off-by-one" not in body
 
     def test_body_contains_verification_results(
         self, task_request, plan_artifact, review_verdict,
@@ -237,25 +237,21 @@ class TestBuildPrBody:
         assert f"Run ID: {run_id}" in body
         assert "Task Type: bug_fix" in body
 
-    def test_body_truncates_long_summary(
+    def test_body_omits_raw_task_prompt(
         self, plan_artifact, review_verdict,
     ):
         req = TaskRequest(
             task_type=TaskType.BUG_FIX,
             repo="example/target",
             title="Fix bug",
-            prompt="x" * 1000,
+            prompt="SENSITIVE_PRIVATE_CONTEXT_9f3c",
         )
         body = _build_pr_body(
             req, plan_artifact, SAMPLE_DIFF,
             [], review_verdict, uuid4(),
         )
-        # Summary section should have at most 500 chars of the prompt
-        summary_start = body.index("## Summary")
-        plan_start = body.index("## Plan")
-        summary_section = body[summary_start:plan_start]
-        # The 'x' count should be 500
-        assert summary_section.count("x") == 500
+        assert "Fix bug" in body
+        assert "SENSITIVE_PRIVATE_CONTEXT_9f3c" not in body
 
     def test_body_plan_no_risks(
         self, task_request, review_verdict,
@@ -271,7 +267,7 @@ class TestBuildPrBody:
             task_request, plan, SAMPLE_DIFF,
             [], review_verdict, uuid4(),
         )
-        assert "Risks: None identified" in body
+        assert "Risks:" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -301,19 +297,27 @@ class TestHelpers:
         )
         assert _task_type_label(req) == "extraction-batch"
 
-    def test_repo_slug_unicorn_app(self):
+    def test_repo_slug_explicit_target(self):
         req = TaskRequest(
             task_type=TaskType.BUG_FIX, repo="example/target",
             title="t", prompt="p",
         )
         assert _repo_slug(req) == "example/target"
 
-    def test_repo_slug_unicorn_foundry(self):
+    def test_repo_slug_explicit_control_repo(self):
         req = TaskRequest(
             task_type=TaskType.BUG_FIX, repo="example/control",
             title="t", prompt="p",
         )
         assert _repo_slug(req) == "example/control"
+
+    def test_repo_slug_rejects_historical_alias(self):
+        req = TaskRequest(
+            task_type=TaskType.BUG_FIX, repo="historical-alias",
+            title="t", prompt="p",
+        )
+        with pytest.raises(ValueError, match="owner/name"):
+            _repo_slug(req)
 
 
 # ---------------------------------------------------------------------------
