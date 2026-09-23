@@ -67,7 +67,7 @@ def _build_pr_body(
             verification_lines.append(f"- [{marker}] {check}")
         verification_section = "\n".join(verification_lines)
     else:
-        verification_section = "- [x] Verification completed"
+        verification_section = "- [ ] No verification results recorded"
 
     # Review section
     review_verdict_str = review_verdict.verdict.value if review_verdict else "N/A"
