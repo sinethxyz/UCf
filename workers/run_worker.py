@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from typing import Any
+from uuid import UUID
 
 import redis.asyncio as aioredis
 
@@ -80,7 +81,8 @@ class RunWorker:
         )
 
         try:
-            response = await self.engine.execute_run(task_request)
+            existing_run_id = UUID(run_id) if run_id is not None else None
+            response = await self.engine.execute_run(task_request, run_id=existing_run_id)
             logger.info(
                 "Run completed: %s — state=%s",
                 response.id,
