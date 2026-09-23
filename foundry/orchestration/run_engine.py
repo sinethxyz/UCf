@@ -258,7 +258,11 @@ class RunEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    async def execute_run(self, task_request: TaskRequest) -> RunResponse:
+    async def execute_run(
+        self,
+        task_request: TaskRequest,
+        run_id: UUID | None = None,
+    ) -> RunResponse:
         """Main entry point: execute a full run lifecycle for the given task.
 
         Orchestrates the complete run pipeline:
@@ -274,16 +278,30 @@ class RunEngine:
 
         Args:
             task_request: The validated task request to execute.
+            run_id: Optional existing queued run ID. Workers use this to execute
+                the run record created by the API instead of creating a second run.
 
         Returns:
             RunResponse with final state and metadata.
         """
 
-        # 1. Create run record in QUEUED state
-        run = await run_queries.create_run(self.session, task_request)
-        run_id = run.id
+        # 1. Create a run record for direct execution, or reuse the queued
+        # record created by the API/worker path.
+        if run_id is None:
+            run = await run_queries.create_run(self.session, task_request)
+            run_id = run.id
+            logger.info("Created run %s for task: %s", run_id, task_request.title)
+        else:
+            run = await run_queries.get_run(self.session, run_id)
+            if run is None:
+                raise ValueError(f"Run {run_id} not found")
+            if RunState(run.state) != RunState.QUEUED:
+                raise ValueError(
+                    f"Run {run_id} must be queued before execution; current state: {run.state}"
+                )
+            logger.info("Executing queued run %s for task: %s", run_id, task_request.title)
+
         worktree_path: str | None = None
-        logger.info("Created run %s for task: %s", run_id, task_request.title)
 
         # Add initial event — run queued
         event = RunEventORM(
@@ -619,6 +637,7 @@ class RunEngine:
             repo=task_request.repo,
             branch_name=branch_name,
             run_id=run_id,
+            base_ref=task_request.base_branch,
         )
         wt_ms = int((time.monotonic() - t0) * 1000)
 
