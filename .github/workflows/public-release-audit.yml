@@ -1,0 +1,112 @@
+name: Public release audit
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Compile
+        run: python -m compileall -q app foundry workers evals
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q
+
+  history-secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks full reachable history
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  historical-archive-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect reachable historical archives without printing contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          import io
+          import re
+          import subprocess
+          import sys
+          import zipfile
+
+          archive_suffixes = (".zip", ".tar", ".tgz", ".tar.gz", ".gz", ".7z")
+          object_lines = subprocess.check_output(
+              ["git", "rev-list", "--objects", "--all"], text=True
+          ).splitlines()
+
+          archives = []
+          for line in object_lines:
+              parts = line.split(" ", 1)
+              if len(parts) != 2:
+                  continue
+              oid, path = parts
+              if path.lower().endswith(archive_suffixes):
+                  archives.append((oid, path))
+
+          print(f"reachable historical archives: {len(archives)}")
+          for _, path in archives:
+              print(f"- {path}")
+
+          signatures = {
+              "private-key": re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+              "github-token": re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})"),
+              "anthropic-key": re.compile(rb"sk-ant-[A-Za-z0-9_-]{20,}"),
+              "aws-access-key": re.compile(rb"AKIA[0-9A-Z]{16}"),
+          }
+
+          findings = []
+          inspected_members = 0
+          for oid, path in archives:
+              blob = subprocess.check_output(["git", "cat-file", "-p", oid])
+              if path.lower().endswith(".zip"):
+                  try:
+                      with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                          for member in zf.infolist():
+                              if member.is_dir():
+                                  continue
+                              inspected_members += 1
+                              try:
+                                  data = zf.read(member)
+                              except Exception:
+                                  continue
+                              for rule, pattern in signatures.items():
+                                  if pattern.search(data):
+                                      findings.append((path, member.filename, rule))
+                  except zipfile.BadZipFile:
+                      findings.append((path, "<archive>", "invalid-zip"))
+
+          print(f"historical zip members inspected: {inspected_members}")
+          if findings:
+              print("high-confidence archive findings (values redacted):")
+              for archive, member, rule in findings:
+                  print(f"- {archive} :: {member} :: {rule}")
+              sys.exit(1)
+
+          print("no high-confidence credential signatures found inside reachable ZIP archives")
+          PY
