@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 5
     max_retries_per_run: int = 3
     worktree_base_path: str = "/tmp/foundry-worktrees"
+    target_repo_path: str = "."
+    target_repo_slug: str = ""
     log_level: str = "INFO"
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="FOUNDRY_")
