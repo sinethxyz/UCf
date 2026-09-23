@@ -17,7 +17,7 @@ from foundry.contracts.run_models import (
     VerificationCheckResult,
     VerificationResponse,
 )
-from foundry.contracts.shared import RunState
+from foundry.contracts.shared import RunState, TaskType
 from foundry.contracts.task_types import TaskRequest
 from foundry.db.queries import artifacts as artifact_queries
 from foundry.db.queries import runs as run_queries
@@ -75,6 +75,15 @@ async def create_run(
     Validates the task request, creates a run record in QUEUED state,
     and enqueues it for processing by the run worker.
     """
+    if task_request.task_type is not TaskType.BUG_FIX:
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Only the historical bug_fix execution lane is implemented "
+                "end-to-end in the preserved public artifact"
+            ),
+        )
+
     run = await run_queries.create_run(db, task_request)
     await db.flush()
 
