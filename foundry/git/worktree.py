@@ -33,13 +33,21 @@ class WorktreeManager:
         self.repo_path = Path(repo_path)
         self.worktree_base = Path(worktree_base)
 
-    async def create(self, repo: str, branch_name: str, run_id: UUID) -> str:
+    async def create(
+        self,
+        repo: str,
+        branch_name: str,
+        run_id: UUID,
+        base_ref: str = "HEAD",
+    ) -> str:
         """Create a new worktree for the given branch and run.
 
         Args:
             repo: Repository identifier (e.g. 'unicorn-app').
             branch_name: The branch to create the worktree for.
             run_id: The run ID that owns this worktree.
+            base_ref: Git ref to branch from. Defaults to HEAD for historical
+                direct callers; orchestrated runs pass TaskRequest.base_branch.
 
         Returns:
             Absolute path to the created worktree directory.
@@ -50,7 +58,7 @@ class WorktreeManager:
         # Create a new branch and worktree
         proc = await asyncio.create_subprocess_exec(
             "git", "worktree", "add", "-b", branch_name,
-            str(worktree_path), "HEAD",
+            str(worktree_path), base_ref,
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
