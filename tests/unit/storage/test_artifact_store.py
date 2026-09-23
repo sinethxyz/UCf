@@ -108,6 +108,15 @@ class TestStore:
         full_path = tmp_path / result["storage_path"]
         assert full_path.read_bytes() == data
 
+    async def test_store_rejects_path_traversal_filename(self, store: ArtifactStore):
+        with pytest.raises(ValueError, match="safe path component"):
+            await store.store(
+                uuid4(),
+                ArtifactType.PLAN,
+                b"secret",
+                filename="../../outside.txt",
+            )
+
     async def test_store_creates_parent_directories(self, store: ArtifactStore, tmp_path: Path):
         run_id = uuid4()
 
@@ -151,6 +160,14 @@ class TestRetrieve:
     async def test_retrieve_nonexistent_raises_file_not_found(self, store: ArtifactStore):
         with pytest.raises(FileNotFoundError, match="Artifact not found"):
             await store.retrieve("runs/nonexistent/plan.json")
+
+    async def test_retrieve_rejects_path_traversal(self, store: ArtifactStore):
+        with pytest.raises(ValueError, match="escapes"):
+            await store.retrieve("../outside.txt")
+
+    async def test_retrieve_rejects_absolute_path(self, store: ArtifactStore, tmp_path: Path):
+        with pytest.raises(ValueError, match="relative"):
+            await store.retrieve(str(tmp_path / "outside.txt"))
 
     async def test_retrieve_roundtrip_string_data(self, store: ArtifactStore):
         run_id = uuid4()
@@ -249,6 +266,10 @@ class TestDelete:
         await store.delete(result["storage_path"])
 
         assert not (tmp_path / result["storage_path"]).exists()
+
+    async def test_delete_rejects_path_traversal(self, store: ArtifactStore):
+        with pytest.raises(ValueError, match="escapes"):
+            await store.delete("../outside.txt")
 
     async def test_delete_nonexistent_is_noop(self, store: ArtifactStore):
         # Should not raise
