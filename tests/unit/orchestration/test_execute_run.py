@@ -38,7 +38,7 @@ from foundry.verification.go_verify import VerificationResult
 def sample_task_request() -> TaskRequest:
     return TaskRequest(
         task_type=TaskType.BUG_FIX,
-        repo="unicorn-app",
+        repo="example/target",
         base_branch="main",
         title="Fix pagination bug",
         prompt="Fix the off-by-one error in search pagination",
@@ -129,7 +129,7 @@ def mock_agent_runner(sample_plan, sample_review) -> MagicMock:
 def mock_pr_creator() -> MagicMock:
     creator = MagicMock()
     creator.create_pr = AsyncMock(return_value={
-        "url": "https://github.com/sinethxyz/unicorn-app/pull/99",
+        "url": "https://github.com/example/target/pull/99",
         "number": 99,
     })
     return creator
@@ -218,7 +218,7 @@ class TestExecuteRunHappyPath:
         with patch("asyncio.create_subprocess_exec", return_value=_make_git_mock()):
             response = await run_engine.execute_run(sample_task_request)
 
-        assert response.pr_url == "https://github.com/sinethxyz/unicorn-app/pull/99"
+        assert response.pr_url == "https://github.com/example/target/pull/99"
 
     async def test_happy_path_stores_pr_metadata_artifact(
         self,
@@ -235,7 +235,7 @@ class TestExecuteRunHappyPath:
 
         storage_path = f"runs/{response.id}/{pr_artifacts[0]['filename']}"
         content = json.loads(await artifact_store.retrieve(storage_path))
-        assert content["url"] == "https://github.com/sinethxyz/unicorn-app/pull/99"
+        assert content["url"] == "https://github.com/example/target/pull/99"
         assert content["number"] == 99
 
     async def test_happy_path_calls_all_phases(
@@ -701,7 +701,7 @@ class TestOpenPr:
                 sample_plan, sample_review, SAMPLE_DIFF,
             )
 
-        assert pr_url == "https://github.com/sinethxyz/unicorn-app/pull/99"
+        assert pr_url == "https://github.com/example/target/pull/99"
 
     async def test_open_pr_stores_pr_metadata_artifact(
         self,
@@ -751,7 +751,7 @@ class TestOpenPr:
 
         run = await get_run(async_session, run_id)
         assert run is not None
-        assert run.pr_url == "https://github.com/sinethxyz/unicorn-app/pull/99"
+        assert run.pr_url == "https://github.com/example/target/pull/99"
 
     async def test_open_pr_creates_pr_opened_and_completed_events(
         self,
