@@ -197,7 +197,7 @@ class TestBuildPrBody:
             task_request, plan_artifact, SAMPLE_DIFF,
             [], review_verdict, uuid4(),
         )
-        assert "[x] Verification completed" in body
+        assert "[ ] No verification results recorded" in body
 
     def test_body_contains_review_verdict(
         self, task_request, plan_artifact, review_verdict,
