@@ -54,7 +54,17 @@ class ArtifactStore:
     """
 
     def __init__(self, base_path: str = "artifacts") -> None:
-        self.base_path = Path(base_path)
+        self.base_path = Path(base_path).resolve()
+
+    def _resolve_storage_path(self, storage_path: str | Path) -> Path:
+        """Resolve a storage path and enforce the configured artifact root."""
+        path = Path(storage_path)
+        if path.is_absolute():
+            raise ValueError("Artifact storage paths must be relative")
+        resolved = (self.base_path / path).resolve()
+        if not resolved.is_relative_to(self.base_path):
+            raise ValueError("Artifact storage path escapes the configured artifact root")
+        return resolved
 
     async def store(
         self,
@@ -79,8 +89,12 @@ class ArtifactStore:
             ext = ".patch" if artifact_type == ArtifactType.DIFF else ".json"
             filename = f"{artifact_type.value}{ext}"
 
+        filename_path = Path(filename)
+        if filename_path.name != filename or filename in {"", ".", ".."}:
+            raise ValueError("Artifact filename must be a single safe path component")
+
         rel_path = Path("runs") / str(run_id) / filename
-        full_path = self.base_path / rel_path
+        full_path = self._resolve_storage_path(rel_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         content = data if isinstance(data, bytes) else data.encode("utf-8")
@@ -111,7 +125,7 @@ class ArtifactStore:
         Raises:
             FileNotFoundError: If the artifact does not exist at the given path.
         """
-        full_path = self.base_path / storage_path
+        full_path = self._resolve_storage_path(storage_path)
         if not full_path.exists():
             raise FileNotFoundError(f"Artifact not found: {storage_path}")
         return full_path.read_bytes()
@@ -122,7 +136,7 @@ class ArtifactStore:
         Args:
             storage_path: The path of the artifact to delete.
         """
-        full_path = self.base_path / storage_path
+        full_path = self._resolve_storage_path(storage_path)
         if full_path.exists():
             full_path.unlink()
             logger.info("Deleted artifact: %s", storage_path)
@@ -136,7 +150,7 @@ class ArtifactStore:
         Returns:
             List of dicts with filename, size_bytes, and modified (ISO timestamp).
         """
-        run_dir = self.base_path / "runs" / str(run_id)
+        run_dir = self._resolve_storage_path(Path("runs") / str(run_id))
         if not run_dir.exists():
             return []
         result: list[ArtifactInfo] = []
