@@ -63,3 +63,19 @@ class TransitionOutcome(FoundryBaseModel):
     observation: TransitionObservation | None = None
     reason: str | None = None
     metadata: dict = Field(default_factory=dict)
+
+
+class ActionProposal(FoundryBaseModel):
+    """Provider-neutral action proposed for an environment."""
+
+    kind: str
+    description: str
+    payload: dict = Field(default_factory=dict)
+
+
+class VerificationDecision(FoundryBaseModel):
+    """Independent judgment of whether the requested transition succeeded."""
+
+    accepted: bool
+    reason: str | None = None
+    evidence: list[EvidenceRef] = Field(default_factory=list)
