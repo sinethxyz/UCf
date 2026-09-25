@@ -99,7 +99,9 @@ class FakeVerifier:
         after: StateSnapshot,
         action: ActionProposal,
         action_evidence: list[EvidenceRef],
+        workspace: str,
     ) -> VerificationDecision:
+        assert workspace.startswith("memory://")
         accepted = (
             before.state["location"] == "dock-a"
             and after.state["location"] == "dock-b"
