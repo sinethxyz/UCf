@@ -3,33 +3,33 @@ name: UCF foundation
 on:
   pull_request:
     paths:
-      - "foundry/adapters/**"
-      - "foundry/contracts/transition_models.py"
-      - "foundry/environments/**"
-      - "foundry/providers/base.py"
-      - "foundry/storage/artifact_store.py"
-      - "foundry/storage/transition_journal.py"
-      - "foundry/verification/policy.py"
-      - "foundry/runtime/**"
-      - "foundry/orchestration/agent_runner.py"
-      - "foundry/orchestration/run_engine.py"
-      - "foundry/contracts/task_types.py"
-      - "tests/unit/runtime/**"
-      - "tests/unit/test_transition_models.py"
-      - "tests/unit/orchestration/test_agent_runner.py"
+      - "foundry/**"
+      - "tests/**"
+      - "pyproject.toml"
       - ".github/workflows/ucf-foundation.yml"
   push:
+    branches: [main]
     paths:
-      - "foundry/contracts/transition_models.py"
-      - "foundry/environments/**"
-      - "foundry/providers/base.py"
-      - "foundry/runtime/**"
+      - "foundry/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/ucf-foundation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ucf-foundation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   foundation:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -39,10 +39,16 @@ jobs:
       - name: Compile
         run: python -m compileall -q foundry tests
       - name: Lint changed foundation
-        run: |
-          ruff check foundry/adapters foundry/contracts/transition_models.py foundry/contracts/task_types.py foundry/environments foundry/providers/base.py foundry/runtime foundry/storage/artifact_store.py foundry/storage/transition_journal.py foundry/verification/policy.py foundry/orchestration/agent_runner.py foundry/orchestration/run_engine.py tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/runtime/test_foundry_transition_adapter.py tests/unit/orchestration/test_agent_runner.py
+        run: >-
+          ruff check foundry/adapters foundry/contracts/transition_models.py
+          foundry/contracts/task_types.py foundry/environments foundry/providers/base.py
+          foundry/runtime foundry/storage/artifact_store.py foundry/storage/transition_journal.py
+          foundry/verification/policy.py foundry/orchestration/agent_runner.py
+          foundry/orchestration/run_engine.py tests/unit/test_transition_models.py
+          tests/unit/runtime tests/unit/orchestration/test_agent_runner.py
       - name: Test foundation
-        run: |
-          pytest -q tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/runtime/test_foundry_transition_adapter.py tests/unit/orchestration/test_agent_runner.py
+        run: >-
+          pytest -q tests/unit/test_transition_models.py tests/unit/runtime
+          tests/unit/orchestration/test_agent_runner.py
       - name: Test full suite
         run: pytest -q

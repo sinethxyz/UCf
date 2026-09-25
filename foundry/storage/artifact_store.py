@@ -7,6 +7,8 @@ Phase 1: local filesystem. Can be upgraded to object storage later.
 
 import hashlib
 import logging
+import os
+import tempfile
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -64,17 +66,11 @@ class ArtifactStore:
         data: bytes | str,
         filename: str | None = None,
     ) -> StoreResult:
-        """Store an artifact for a run.
+        """Store an artifact using same-filesystem atomic replacement.
 
-        Args:
-            run_id: The run that produced this artifact.
-            artifact_type: Type of artifact (plan, diff, review, etc.).
-            data: Raw artifact data as bytes or string.
-            filename: Optional custom filename. Defaults to
-                '{artifact_type}.json' (or '.patch' for diffs).
-
-        Returns:
-            Dict with storage_path (relative), size_bytes, and SHA-256 checksum.
+        The temporary file is flushed and synced before replacement, then its
+        directory is synced. This is local file persistence, not a distributed
+        transaction or a guarantee of exactly-once action execution.
         """
         if filename is None:
             ext = ".patch" if artifact_type == ArtifactType.DIFF else ".json"
@@ -85,7 +81,18 @@ class ArtifactStore:
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         content = data if isinstance(data, bytes) else data.encode("utf-8")
-        full_path.write_bytes(content)
+        with tempfile.TemporaryDirectory(prefix=".ucf-write-", dir=full_path.parent) as staging:
+            temporary = Path(staging) / "artifact"
+            with temporary.open("wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, full_path)
+            directory_fd = os.open(full_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
 
         size_bytes = len(content)
         checksum = hashlib.sha256(content).hexdigest()
@@ -101,42 +108,21 @@ class ArtifactStore:
         )
 
     async def retrieve(self, storage_path: str) -> bytes:
-        """Retrieve an artifact by its storage path.
-
-        Args:
-            storage_path: The path returned by store().
-
-        Returns:
-            Raw artifact data as bytes.
-
-        Raises:
-            FileNotFoundError: If the artifact does not exist at the given path.
-        """
+        """Retrieve an artifact by its storage path."""
         full_path = self.base_path / storage_path
         if not full_path.exists():
             raise FileNotFoundError(f"Artifact not found: {storage_path}")
         return full_path.read_bytes()
 
     async def delete(self, storage_path: str) -> None:
-        """Delete an artifact from storage.
-
-        Args:
-            storage_path: The path of the artifact to delete.
-        """
+        """Delete an artifact from storage."""
         full_path = self.base_path / storage_path
         if full_path.exists():
             full_path.unlink()
             logger.info("Deleted artifact: %s", storage_path)
 
     async def list_artifacts(self, run_id: UUID) -> list[ArtifactInfo]:
-        """List all artifacts for a given run with metadata.
-
-        Args:
-            run_id: The run to list artifacts for.
-
-        Returns:
-            List of dicts with filename, size_bytes, and modified (ISO timestamp).
-        """
+        """List all artifacts for a given run with metadata."""
         run_dir = self.base_path / "runs" / str(run_id)
         if not run_dir.exists():
             return []
