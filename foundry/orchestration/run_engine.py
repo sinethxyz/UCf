@@ -17,9 +17,8 @@ import traceback as tb_module
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 import redis.asyncio as aioredis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.contracts.review_models import ReviewIssue, ReviewVerdict
 from foundry.contracts.run_models import RunResponse
@@ -343,7 +342,11 @@ class RunEngine:
                     state_at_failure = run.state
                     current_state = RunState(run.state)
                     # Abbreviate traceback for metadata (last 1500 chars)
-                    abbreviated_tb = full_traceback[-1500:] if len(full_traceback) > 1500 else full_traceback
+                    abbreviated_tb = (
+                        full_traceback[-1500:]
+                        if len(full_traceback) > 1500
+                        else full_traceback
+                    )
                     if RunState.ERRORED in VALID_TRANSITIONS.get(current_state, set()):
                         await self._transition(
                             run_id, current_state, RunState.ERRORED,
@@ -396,7 +399,11 @@ class RunEngine:
                 try:
                     await self.worktree_manager.cleanup(worktree_path)
                 except Exception:
-                    logger.warning("Failed to clean up worktree at %s for run %s", worktree_path, run_id)
+                    logger.warning(
+                        "Failed to clean up worktree at %s for run %s",
+                        worktree_path,
+                        run_id,
+                    )
 
     async def cancel_run(self, run_id: UUID) -> RunResponse:
         """Cancel an in-progress run.
@@ -457,9 +464,13 @@ class RunEngine:
 
         current_state = RunState(run.state)
         if current_state not in _RETRYABLE_STATES:
+            retryable_states = ", ".join(
+                state.value
+                for state in sorted(_RETRYABLE_STATES, key=lambda state: state.value)
+            )
             raise ValueError(
                 f"Run {run_id} in state {current_state.value} is not retryable. "
-                f"Only runs in {', '.join(s.value for s in sorted(_RETRYABLE_STATES, key=lambda s: s.value))} can be retried."
+                f"Only runs in {retryable_states} can be retried."
             )
 
         await self._transition(
@@ -768,7 +779,11 @@ class RunEngine:
         """
         # Determine model and language for implementation
         from foundry.orchestration.model_router import resolve_model
-        impl_model = resolve_model(task_request.task_type, "implementer", task_request.model_override)
+        impl_model = resolve_model(
+            task_request.task_type,
+            "implementer",
+            task_request.model_override,
+        )
         language = "go"  # Go-only for Phase 1
 
         # Transition to IMPLEMENTING
@@ -1062,7 +1077,11 @@ class RunEngine:
         """
         from foundry.orchestration.model_router import resolve_model
 
-        review_model = resolve_model(task_request.task_type, "reviewer", task_request.model_override)
+        review_model = resolve_model(
+            task_request.task_type,
+            "reviewer",
+            task_request.model_override,
+        )
 
         # 1. Transition to REVIEWING
         await self._transition(
