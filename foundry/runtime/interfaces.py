@@ -8,9 +8,9 @@ from foundry.contracts.transition_models import (
     ActionProposal,
     EvidenceRef,
     StateSnapshot,
+    TransitionOutcome,
     TransitionRequest,
     VerificationDecision,
-    TransitionOutcome,
 )
 
 
@@ -62,5 +62,5 @@ class TransitionVerifier(Protocol):
 class TransitionJournal(Protocol):
     """Persist the verified outcome so continuity does not depend on call context."""
 
-    async def record(self, outcome: "TransitionOutcome") -> None:
+    async def record(self, outcome: TransitionOutcome) -> None:
         ...
