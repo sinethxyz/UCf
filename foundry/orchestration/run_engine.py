@@ -1164,7 +1164,8 @@ class RunEngine:
         issue_count = len(review.issues)
         await self._add_event(
             run_id, RunState.REVIEWING,
-            f"Review verdict: {review.verdict.value}, {issue_count} issues",
+            f"Review complete: {review.verdict.value}, issues: {issue_count}, "
+            f"confidence: {review.confidence}",
             metadata={
                 "artifact": "review.json",
                 "verdict": review.verdict.value,
