@@ -82,6 +82,14 @@ class FakeExecutor:
         ]
 
 
+class FakeJournal:
+    def __init__(self) -> None:
+        self.outcomes = []
+
+    async def record(self, outcome) -> None:
+        self.outcomes.append(outcome)
+
+
 class FakeVerifier:
     async def verify(
         self,
@@ -110,12 +118,14 @@ class FakeVerifier:
 
 async def test_transition_engine_closes_loop_without_unicorn_git_or_claude() -> None:
     environment = FakeEnvironment()
+    journal = FakeJournal()
     engine = TransitionEngine(
         environment=environment,
         observer=FakeObserver(),
         planner=FakePlanner(),
         executor=FakeExecutor(),
         verifier=FakeVerifier(),
+        journal=journal,
     )
     request = TransitionRequest(
         environment="warehouse-robot",
@@ -132,4 +142,5 @@ async def test_transition_engine_closes_loop_without_unicorn_git_or_claude() -> 
     assert outcome.observation is not None
     assert len(outcome.observation.action_evidence) == 1
     assert len(outcome.observation.verification_evidence) == 1
+    assert journal.outcomes == [outcome]
     assert environment.cleaned is True
