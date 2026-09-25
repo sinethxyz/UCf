@@ -7,6 +7,7 @@ from foundry.contracts.transition_models import (
     ActionProposal,
     EvidenceRef,
     StateSnapshot,
+    TransitionOutcome,
     TransitionRequest,
     VerificationDecision,
 )
@@ -84,9 +85,9 @@ class FakeExecutor:
 
 class FakeJournal:
     def __init__(self) -> None:
-        self.outcomes = []
+        self.outcomes: list[TransitionOutcome] = []
 
-    async def record(self, outcome) -> None:
+    async def record(self, outcome: TransitionOutcome) -> None:
         self.outcomes.append(outcome)
 
 
@@ -144,3 +145,10 @@ async def test_transition_engine_closes_loop_without_unicorn_git_or_claude() -> 
     assert len(outcome.observation.verification_evidence) == 1
     assert journal.outcomes == [outcome]
     assert environment.cleaned is True
+
+    next_request = TransitionRequest(
+        environment=request.environment,
+        objective="return to dock-a",
+        before_state=outcome.after_state,
+    )
+    assert next_request.before_state is outcome.after_state
