@@ -63,13 +63,11 @@ The public name is **Continuity**. Python imports still use `foundry`, the distr
 
 The following is a dated record, not a claim that every planned capability is available.
 
-**Merged baseline:** commit `2639b8ebeeb485950a8faed17491b03ff440b354`, validated on 25 September 2026. [GitHub Actions run 36120929154](https://github.com/sinethxyz/UCf/actions/runs/36120929154) passed installation, compilation, targeted Ruff checks, 21 selected foundation/adapter tests, and the full 495-test suite. The selected tests are included in the total. The suite emitted 2,774 warnings.
+**Merged baseline:** commit `6cc52e5e8dd22bccf6d00b7e78bb542f0538f8a3`, validated on 25 September 2026. [GitHub Actions run 36140729000](https://github.com/sinethxyz/continuity/actions/runs/36140729000) passed installation, compilation, targeted Ruff checks, the 51-test foundation/adapter/integrity subset, and the full 525-test regression suite. The selected tests are included in the total. The suite still emits existing warnings; passing tests are evidence for the exercised boundaries, not a production-readiness claim.
 
-The adapter integration test uses a real temporary Git repository, real worktree isolation, real state observation, and local outcome storage. Model behaviour and verifier results are deterministic test substitutes. This establishes an integration boundary, not reliable live-model autonomy.
+The adapter and integrity tests use real temporary Git repositories, worktree isolation, state observation, local artifact storage, patch capture/replay, and fresh-process journal reload. Model behaviour and verifier results remain deterministic test substitutes. This establishes a stronger systems integration boundary, not reliable live-model autonomy.
 
-**Pending reliability work:** [PR #6](https://github.com/sinethxyz/UCf/pull/6) preserves retrievable patches and reports before cleanup, adds failure records and fresh-state checks, and tests journal reload and patch replay. Its branch passed 525 tests, including a 51-test selected subset, in [run 36138567006](https://github.com/sinethxyz/UCf/actions/runs/36138567006). At preparation of this introduction, that PR is **open and unmerged**. Those improvements must not be attributed to the merged baseline.
-
-In particular, the baseline adapter can retain a patch checksum without retaining the patch itself before cleanup. That gap is one reason the evidence-retention work must precede claims about durable continuation.
+The reliability pass now preserves retrievable plans, patches, verification/review reports, and outcome records before cleanup; records failure paths; checks fresh state against supplied preconditions; and exercises replay/reload behavior. See [evidence-retention.md](docs/evidence-retention.md) for the exact scope and limitations.
 
 ## Run the tests
 
@@ -114,7 +112,7 @@ The earlier commits, [original architecture specification](docs/architecture.md)
 
 ## Next milestones
 
-The immediate sequence is to review the pending evidence-retention work, honour explicit base-state requirements, make verification coverage and review acceptance unambiguous, and then converge the historical runtime onto the transition loop.
+The immediate sequence is to honour explicit base-reference requirements, make verification coverage and review acceptance unambiguous, and then converge the historical runtime onto the transition loop.
 
 After that, longer-running, failure-injected and bounded live-model evaluations can test whether the architecture improves continuity in practice. Those evaluations have not been demonstrated here.
 
@@ -138,6 +136,8 @@ See the [architecture mapping](docs/ucf-architecture.md), [runtime decoupling au
 
 ## Licence
 
-The existing notice remains: **Internal use only. Not licensed for external distribution.**
+Continuity is licensed under the **GNU Affero General Public License v3.0 only (AGPL-3.0-only)**.
 
-This naming and documentation pass does not grant a new licence. A public-release/reuse licence requires a separate owner decision; the project is not being announced as open source in this pass.
+Copyright © 2026 Sineth Madduma.
+
+See [LICENSE](LICENSE) for the complete licence text. The AGPL includes source-availability obligations for modified versions offered to users over a network; anyone deploying or redistributing modified versions should review the licence terms that apply to their use.
