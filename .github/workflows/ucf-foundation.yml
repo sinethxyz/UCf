@@ -1,0 +1,43 @@
+name: UCF foundation
+
+on:
+  pull_request:
+    paths:
+      - "foundry/contracts/transition_models.py"
+      - "foundry/environments/**"
+      - "foundry/providers/base.py"
+      - "foundry/runtime/**"
+      - "foundry/orchestration/agent_runner.py"
+      - "foundry/contracts/task_types.py"
+      - "tests/unit/runtime/**"
+      - "tests/unit/test_transition_models.py"
+      - "tests/unit/orchestration/test_agent_runner.py"
+      - ".github/workflows/ucf-foundation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "foundry/contracts/transition_models.py"
+      - "foundry/environments/**"
+      - "foundry/providers/base.py"
+      - "foundry/runtime/**"
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Compile
+        run: python -m compileall -q foundry tests
+      - name: Lint changed foundation
+        run: |
+          ruff check             foundry/contracts/transition_models.py             foundry/contracts/task_types.py             foundry/environments             foundry/providers/base.py             foundry/runtime             foundry/orchestration/agent_runner.py             tests/unit/test_transition_models.py             tests/unit/runtime/test_transition_engine.py             tests/unit/orchestration/test_agent_runner.py
+      - name: Test foundation
+        run: |
+          pytest -q             tests/unit/test_transition_models.py             tests/unit/runtime/test_transition_engine.py             tests/unit/orchestration/test_agent_runner.py
