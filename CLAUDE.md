@@ -6,9 +6,9 @@
 
 This is a documentation rebrand, not a package or runtime migration. Keep `foundry` imports, the `unicorn-foundry` distribution name, `FOUNDRY_*` configuration, workflow identifiers, historical documents, and existing technical contracts unchanged unless a separate task explicitly migrates them.
 
-The original README is preserved verbatim in `LEGACY_FOUNDRY.md`. The public description, topics, draft announcement, and remaining launch decisions live in `docs/publication.md`. A documentation commit does not change GitHub repository settings or grant an open-source licence.
+The original README is preserved verbatim in `LEGACY_FOUNDRY.md`. The public description, topics, draft announcement, and remaining launch decisions live in `docs/publication.md`. The repository is publicly named Continuity and is licensed under AGPL-3.0-only. Preserve the historical UCF/Foundry names only where they describe the implementation history.
 
-Distinguish merged capabilities from unmerged PR work in every public claim. At this rebrand's preparation, PR #6 remains open and unmerged. Do not merge it or this documentation PR as part of the naming pass.
+Distinguish merged capabilities from future or experimental work in every public claim. The evidence-retention reliability pass is merged; do not describe later milestones as completed until their own evidence exists.
 
 The implementation guidance below retains its UCF/Foundry terminology; the discontinued Unicorn product is historical context, not a reason to revive it.
 
