@@ -1,76 +1,142 @@
 # Runtime Decoupling Audit
 
-This audit separates the general UCF mechanism from assumptions inherited from Unicorn Foundry.
+This audit separates the general UCF mechanism from assumptions inherited from
+Unicorn Foundry and records which abstractions have been exercised by real
+historical machinery.
 
-## Already generalized in this branch
+## Current architecture
 
-### Intelligence provider boundary
+The repository now has three related layers:
 
-`AgentRunner` now depends on an `IntelligenceProvider` protocol. Claude remains the default historical implementation, but the orchestration boundary no longer requires the concrete Claude provider type.
+1. **UCF foundation** — provider-neutral state, evidence, action, verification,
+   outcome, environment, and journal contracts.
+2. **Foundry adapter path** — the original Git/agent/verification/artifact
+   machinery running through `TransitionEngine`.
+3. **Historical RunEngine** — the backwards-compatible API/database/PR lifecycle
+   that still owns the old `queued -> ... -> pr_opened -> completed` state machine.
 
-### Execution target boundary
+The second layer is important: the general boundary is no longer proven only by
+fakes.
 
-`TaskRequest.repo` remains named for backwards compatibility, but it is no longer restricted to `unicorn-app` or `unicorn-foundry`.
+## Generalized and exercised boundaries
 
-### Environment boundary
+### Intelligence provider
 
-`ExecutionEnvironment` defines prepare, observe-changes, and cleanup operations. `GitWorktreeEnvironment` adapts the historical worktree implementation to that interface.
+`AgentRunner` depends on `IntelligenceProvider`. Claude remains the default
+historical backend, but provider identity is outside the UCF runtime contract.
 
-### Transition vocabulary
+### Execution environment and observation
 
-`foundry/contracts/transition_models.py` defines provider-neutral state snapshots, evidence references, action proposals, transition requests, observations, verification decisions, and outcomes without assuming GitHub or Unicorn.
+`ExecutionEnvironment` owns workspace preparation and cleanup.
+`GitWorktreeEnvironment` adapts the historical `WorktreeManager`.
 
-### Generic transition loop
+`GitStateObserver` turns an actual Git workspace into explicit state containing
+HEAD, dirty status, changed files, and a diff checksum. This supplies real
+before/after state to the generic loop.
 
-`TransitionEngine` now coordinates a minimal provider-neutral loop through injected observer, planner, executor, verifier, environment, and journal capabilities. The engine does not know about Claude, GitHub, Go, TypeScript, or Unicorn.
+### Transition vocabulary and engine
 
-The historical `RunEngine` is still unchanged and Git/PR-shaped. The new engine is a parallel foundation, not a claim that migration is complete.
+`TransitionEngine` coordinates:
+
+```text
+state(t)
+  -> plan
+  -> controlled action
+  -> observe
+  -> verify / independently review
+  -> durable outcome
+  -> state(t+1)
+```
+
+The engine does not know about Claude, GitHub, Go, TypeScript, Unicorn, or pull
+requests.
+
+### Historical Foundry adapters
+
+`foundry/adapters/foundry_transition.py` maps the original capabilities onto
+that loop:
+
+| Historical capability | UCF role |
+| --- | --- |
+| `TaskRequest` | `TransitionRequest` input |
+| `AgentRunner.run_planner` | `TransitionPlanner` |
+| `AgentRunner.run_implementer` | `ActionExecutor` |
+| Git worktree | `ExecutionEnvironment` |
+| Git HEAD/status/diff | `StateObserver` |
+| `VerificationRunner` | deterministic verification |
+| blind reviewer | independent transition evaluation |
+| migration guard | shared protected-path verification policy |
+| `ArtifactStore` | `TransitionJournal` |
+| review/verification result | `TransitionOutcome` evidence |
+
+`REQUEST_CHANGES` remains advisory in the adapter because that is the historical
+Foundry behavior. `REJECT` and deterministic verification failure reject the
+transition.
+
+### Shared safety policy
+
+Protected-path matching and migration-guard authorization now live in
+`foundry/verification/policy.py`. Both `RunEngine` and the UCF adapter use the
+same policy instead of maintaining parallel copies.
+
+### Durable continuity
+
+`ArtifactStoreTransitionJournal` persists
+`transition_outcome.json` under the transition ID before workspace cleanup.
+The resulting after-state can seed the next transition.
+
+## Evidence
+
+The adapter integration test creates a real temporary Git repository and uses
+the real `WorktreeManager` and `GitStateObserver`. It then runs planning,
+implementation, verification, blind review, journaling, and cleanup through
+`TransitionEngine`.
+
+Current CI evidence for this milestone:
+
+- 21 targeted UCF / Foundry-adapter tests pass;
+- 495 full-suite tests pass;
+- compile and targeted Ruff checks pass.
 
 ## Remaining historical couplings
 
-| Coupling | Current form | General form | Migration priority |
+| Coupling | Current state | Desired boundary | Priority |
 | --- | --- | --- | --- |
-| Lifecycle terminal | `PR_OPENED -> COMPLETED` | outcome recorded / accepted | P0 |
-| Action environment | Git worktree | ExecutionEnvironment | P0 |
-| Action result | Git diff + PR | environment-specific action artifact | P0 |
-| Implementer role | Go / TypeScript literal | executor capability | P1 |
-| Verification | Go/TS/schema commands | verifier plugins | P1 |
+| Run lifecycle terminal | `PR_OPENED -> COMPLETED` still lives in `RunEngine` | verified `TransitionOutcome` defines operation result | P0 |
+| Publication | PR creation is embedded in run lifecycle | publisher is post-transition / environment-specific | P0 |
+| Runtime convergence | adapter path and `RunEngine` both exist | legacy engine delegates core transition work | P0 |
+| Persistence | run/PR/worktree tables | transition/outcome/workspace records + legacy projection | P1 |
+| Executor language | Go / TypeScript literal | executor capability selection | P1 |
+| Verification | code-oriented Go/TS/schema dispatch | verifier plugins by environment/capability | P1 |
 | Model routing | Claude model IDs | provider + capability routing | P1 |
-| Prompt layer | coding-specific planner/implementer prompts | transition-role prompts | P1 |
+| Prompts | coding-specific role prompts | environment-specific planner/executor adapters | P1 |
 | Canon | Unicorn/startup schemas | environment-specific state contracts | P2 |
 | Extraction | startup signal extraction | observer adapters | P2 |
-| Config names | FOUNDRY, unicorn_app_* | UCF + legacy aliases | P2 |
-| Persistence names | runs, PR URL, worktrees | transitions, outcomes, workspaces | P3 |
-| API routes | /runs, /patches, /worktrees | /transitions, /actions, /environments | P3 |
+| Config | `FOUNDRY_*`, Unicorn-era names | UCF names + compatibility aliases | P2 |
+| API | `/runs`, `/patches`, `/worktrees` | transition/action/environment surfaces | P3 |
 
-## P0 foundation status
+## Next P0 milestone: converge RunEngine
 
-The generic loop now exists alongside Foundry:
+Do not delete or rename the historical state machine first. Make it a
+compatibility projection over the UCF transition loop.
 
-1. an execution environment prepares and cleans up an isolated workspace;
-2. an observer establishes explicit before-state;
-3. a planner proposes a provider-neutral action;
-4. an executor applies the action;
-5. the observer establishes after-state;
-6. an independent verifier accepts or rejects the transition;
-7. a journal records the verified outcome;
-8. the resulting state can seed the next transition.
+The next migration should:
 
-`tests/unit/runtime/test_transition_engine.py` exercises this with a non-Unicorn environment and fake capabilities.
+1. let a legacy `TaskRequest` create a UCF `TransitionRequest`;
+2. delegate plan -> execute -> observe -> verify -> journal to
+   `FoundryTransitionRuntime`;
+3. map a rejected `TransitionOutcome` into the existing failure states/events;
+4. map an accepted outcome into the existing post-verification path;
+5. treat PR creation as publication after an accepted transition, not as the
+   definition of the transition itself;
+6. preserve current API responses, database rows, artifacts, and event history
+   while compatibility is required.
 
-The next P0 task is **adapter migration**: make the historical Git/Claude workflow exercise these interfaces rather than maintaining a separate architectural path. In particular, `PR_OPENED -> COMPLETED` must stop being the general definition of a successful transition.
+This is the point at which the two runtime paths actually converge.
 
 ## What should not be renamed yet
 
-Do not mass-rename Foundry classes, database tables, routes, or artifact types merely to match the new vocabulary. Renaming before the generalized loop works would create churn without increasing capability.
-
-Keep the historical runtime operational while new interfaces are introduced alongside it. Once a non-Unicorn closed loop passes end to end, migrate internals incrementally.
-
-## Foundation boundary
-
-The repository now contains the code-level boundary required to test UCF independently from Unicorn. Because the historical runtime is not yet routed through `TransitionEngine`, the project is currently in a dual state:
-
-- **general UCF foundation:** provider/environment/transition interfaces plus a minimal loop;
-- **historical Foundry runtime:** the working Git/PR orchestration implementation.
-
-The next milestone is to make those two paths converge without erasing the original implementation history.
+Do not mass-rename Foundry classes, database tables, routes, or artifact types
+merely to match the new vocabulary. Generalization is being earned through
+exercised interfaces and regression tests. Rename only when a replacement
+boundary is in use.
