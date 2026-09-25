@@ -1,4 +1,16 @@
-# UCF — Project Guidance
+# Continuity — Project Guidance
+
+## Naming and publication
+
+**Continuity** is the public-facing name of the experiment previously documented as **UCF / Unicorn Foundry**. Use Continuity in new public introductions. Preserve UCF and Unicorn Foundry when describing the history or referring to existing technical names.
+
+This is a documentation rebrand, not a package or runtime migration. Keep `foundry` imports, the `unicorn-foundry` distribution name, `FOUNDRY_*` configuration, workflow identifiers, historical documents, and existing technical contracts unchanged unless a separate task explicitly migrates them.
+
+The original README is preserved verbatim in `LEGACY_FOUNDRY.md`. The public description, topics, draft announcement, and remaining launch decisions live in `docs/publication.md`. A documentation commit does not change GitHub repository settings or grant an open-source licence.
+
+Distinguish merged capabilities from unmerged PR work in every public claim. At this rebrand's preparation, PR #6 remains open and unmerged. Do not merge it or this documentation PR as part of the naming pass.
+
+The implementation guidance below retains its UCF/Foundry terminology; the discontinued Unicorn product is historical context, not a reason to revive it.
 
 ## What This Repo Is
 
