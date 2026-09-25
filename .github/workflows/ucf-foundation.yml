@@ -14,8 +14,6 @@ on:
       - "tests/unit/orchestration/test_agent_runner.py"
       - ".github/workflows/ucf-foundation.yml"
   push:
-    branches:
-      - main
     paths:
       - "foundry/contracts/transition_models.py"
       - "foundry/environments/**"
