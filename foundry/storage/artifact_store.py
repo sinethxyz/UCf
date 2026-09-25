@@ -7,8 +7,8 @@ Phase 1: local filesystem. Can be upgraded to object storage later.
 
 import hashlib
 import logging
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import TypedDict
 from uuid import UUID
@@ -16,7 +16,7 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 
-class ArtifactType(str, Enum):
+class ArtifactType(StrEnum):
     """Types of artifacts produced by Foundry runs."""
 
     PLAN = "plan"
@@ -149,7 +149,7 @@ class ArtifactStore:
                 filename=f.name,
                 size_bytes=stat.st_size,
                 modified=datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc,
+                    stat.st_mtime, tz=UTC,
                 ).isoformat(),
             ))
         return result
