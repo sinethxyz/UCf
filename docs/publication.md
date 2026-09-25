@@ -47,15 +47,11 @@ Python imports stay under `foundry`. The distribution stays `unicorn-foundry`. E
 
 [LEGACY_FOUNDRY.md](../LEGACY_FOUNDRY.md) preserves the old README verbatim from commit `2639b8ebeeb485950a8faed17491b03ff440b354` (blob `7caeb132210e40d8f98ed587204eef41cb03d2dd`). Its root location preserves the original relative links.
 
-## Owner-admin actions still required
+## Repository settings
 
-The available GitHub connection supports repository files and PRs, but does not expose a repository rename or About/topics update action. Those settings have not been changed by this documentation pass.
+The repository has been renamed to `sinethxyz/continuity`, and the approved About description and topics have been applied by the owner.
 
-Apply the repository name, About description, and topics above using the owner's GitHub controls, confirming that the chosen name is available. Keep the existing visibility; this pass does not request a visibility change. Do not invent a project homepage or package URL.
-
-After the rename, verify the canonical repository URL, old inbound links, open PRs, and any relevant integrations. Update local Git remotes after confirming the new URL. Do not create a replacement repository or discard the existing history.
-
-Repository settings are separate from Git commits; putting `Continuity` in the README cannot rename the repository.
+The existing Git history is preserved. Local clones should use the canonical remote `https://github.com/sinethxyz/continuity.git`.
 
 ## Draft announcement
 
@@ -77,25 +73,23 @@ At preparation:
 
 | Revision | Scope | Evidence |
 | --- | --- | --- |
-| Merged main `2639b8e` | Transition foundation and Foundry adapter | 495 full-suite tests; 21 selected tests included in the total |
-| Open [PR #6](https://github.com/sinethxyz/UCf/pull/6), head `8a421e5` | Evidence retention, failure records, state checks, reload/replay tests | 525 full-suite tests; 51 selected tests included in the total |
-| This public-introduction branch | Naming and documentation only | No new runtime capability or model evaluation |
+| Merged main `6cc52e5` | Transition foundation, Foundry adapter, evidence retention, failure records, state checks, reload/replay tests | 525 full-suite tests; 51 selected tests included in the total |
+| This public-introduction branch | Naming, licensing and documentation | No new model capability or deployment |
 
-Sources: [baseline CI](https://github.com/sinethxyz/UCf/actions/runs/36120929154) and [PR #6 CI](https://github.com/sinethxyz/UCf/actions/runs/36138567006). Both test runs reported 2,774 warnings. Recheck the actual publication revision before using any count in an announcement.
+Source: [main CI](https://github.com/sinethxyz/continuity/actions/runs/36140729000). The run completed successfully on the merged reliability baseline. Recheck the final publication revision before quoting test counts.
 
-The pending PR's code and test evidence do not belong to main until that PR is approved and merged. Keep this rebrand separate from that approval. Renaming the repository does not fix the base-reference limitation, complete verifier coverage, migrate RunEngine, or provide crash recovery.
+Renaming and licensing the repository do not fix the base-reference limitation, complete verifier coverage, migrate RunEngine, provide crash recovery, or establish production readiness.
 
-## Licence decision
+## Licence
 
-The pre-rebrand README says: **Internal use only. Not licensed for external distribution.** This pass preserves that notice and does not choose a new licence.
+The owner selected **GNU Affero General Public License v3.0 only (AGPL-3.0-only)** for Continuity. The repository includes the complete licence text in `LICENSE`; package metadata uses the same SPDX expression.
 
-Before presenting this as an open-source release or inviting external reuse, the owner must explicitly decide the licensing terms. Do not add an MIT, Apache, or other licence merely because the repository is public.
+The pre-rebrand `LEGACY_FOUNDRY.md` remains a historical snapshot and may contain the former internal-use notice. That snapshot does not override the current root licence.
 
 ## Launch checklist
 
-- [ ] Apply and verify the repository name and About/topics settings.
-- [ ] Review and approve the documentation-only rebrand separately; no merge is performed by this pass.
-- [ ] Review PR #6 separately; leave it unmerged until explicitly approved.
-- [ ] Resolve the public-release/reuse licence decision.
-- [ ] Recheck the final published commit, links, CI evidence, and capability statements.
+- [x] Apply and verify the repository name and About/topics settings.
+- [x] Merge and validate the evidence-retention reliability pass.
+- [x] Select AGPL-3.0-only and add repository/package licence metadata.
+- [ ] Recheck the final public-introduction merge commit, links, CI evidence, and capability statements.
 - [ ] Publish the announcement only after the desired public state is confirmed.
