@@ -15,6 +15,7 @@ from foundry.environments.base import ExecutionEnvironment
 from foundry.runtime.interfaces import (
     ActionExecutor,
     StateObserver,
+    TransitionJournal,
     TransitionPlanner,
     TransitionVerifier,
 )
@@ -30,12 +31,14 @@ class TransitionEngine:
         planner: TransitionPlanner,
         executor: ActionExecutor,
         verifier: TransitionVerifier,
+        journal: TransitionJournal,
     ) -> None:
         self.environment = environment
         self.observer = observer
         self.planner = planner
         self.executor = executor
         self.verifier = verifier
+        self.journal = journal
 
     async def execute(self, request: TransitionRequest) -> TransitionOutcome:
         workspace = await self.environment.prepare(
@@ -68,7 +71,7 @@ class TransitionEngine:
                 action_evidence=action_evidence,
                 verification_evidence=decision.evidence,
             )
-            return TransitionOutcome(
+            outcome = TransitionOutcome(
                 transition_id=request.id,
                 accepted=decision.accepted,
                 before_state=before,
@@ -77,5 +80,7 @@ class TransitionEngine:
                 reason=decision.reason,
                 metadata={"action_kind": action.kind},
             )
+            await self.journal.record(outcome)
+            return outcome
         finally:
             await self.environment.cleanup(workspace)
