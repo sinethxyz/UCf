@@ -1,27 +1,45 @@
-# Unicorn Foundry — Project Guidance
+# UCF — Project Guidance
 
 ## What This Repo Is
 
-unicorn-foundry is the internal Claude orchestration system for Unicorn Protocol.
-It plans, builds, reviews, extracts, evaluates, and improves the Unicorn system.
+UCF is an experiment in persistent machine operation across changing state.
 
-It is NOT a chatbot. It is a controlled run engine that produces artifacts, diffs, PRs, and structured data.
+The repository now contains two layers:
 
-There are two repos:
-- `unicorn-app` — the product (Next.js + Go + Postgres). Users touch this.
-- `unicorn-foundry` — this repo. The build system. Humans and Claude touch this.
+- **UCF foundation** — provider-neutral contracts and a minimal transition runtime built around explicit state, evidence, action, verification, outcomes, and continuity.
+- **Historical Foundry runtime** — the original Claude/Git/PR orchestration system built while working on the now-discontinued Unicorn project.
 
-Foundry writes code INTO unicorn-app via git worktrees and PRs. It never writes to unicorn-app's database directly. It never deploys anything.
+The historical implementation is evidence of how the experiment emerged. Preserve it, but do not treat Unicorn, Claude, GitHub, source code, or pull requests as architectural invariants of UCF.
+
+The general loop is:
+
+**State(t) → Reason/Plan → Controlled Action → Observation → Verification → Outcome → State(t+1)**
+
+The important object is the state transition. The model is a participant in the loop, not the loop itself.
 
 ## Core Thesis
 
-Unicorn Protocol makes startup reality computationally legible.
+UCF explores the boundary between **intelligence at an instant** and **intelligence through time**.
 
-The chain: **Signals → Evidence → State → Legibility**
+New foundation work should preserve these invariants:
 
-A startup emits signals. Those signals become evidence. Evidence is used to infer state. State becomes legible to humans and software.
+1. state is explicit;
+2. evidence remains attached to claims about state and outcomes;
+3. actions occur through controlled environment boundaries;
+4. verification is separate from generation;
+5. meaningful transitions leave durable history;
+6. intelligence providers are replaceable;
+7. resulting state can seed the next transition.
 
-Everything Foundry builds must serve that chain.
+The original Unicorn chain — **Signals → Evidence → State → Legibility** — remains historical context, not the active product objective.
+
+## Compatibility Rule
+
+Do not mass-rename or delete historical Foundry code merely to make terminology look generic. Generalization must be earned through exercised interfaces and tests.
+
+When touching new UCF foundation code, prefer the contracts under `foundry/contracts/transition_models.py`, `foundry/runtime/`, `foundry/environments/`, and `foundry/providers/base.py`.
+
+When touching historical Foundry code, preserve existing behavior unless the task explicitly migrates that behavior onto the new transition interfaces.
 
 ## Non-Negotiable Rules
 
@@ -43,7 +61,7 @@ Everything Foundry builds must serve that chain.
 
 9. **Structured output over prose.** Plans, reviews, extractions, evals, and verification results must return validated JSON matching their defined schemas. Never return prose where structured output is expected.
 
-10. **No Claude in the hot path.** unicorn-app serves precomputed truth. Claude lives in Foundry, before the read models, not inside user requests.
+10. **Do not introduce new provider coupling into the UCF foundation.** Claude remains the default provider for the historical Foundry runtime, but new transition/runtime interfaces must depend on capabilities rather than a model vendor.
 
 ## Repo Layout
 
@@ -71,9 +89,9 @@ unicorn-foundry/
 └── tests/                     ← unit + integration
 ```
 
-## Canon
+## Historical Foundry Canon
 
-The source of truth for Unicorn's domain model lives in `canon/`.
+The source of truth for the historical Unicorn domain model lives in `canon/`. It is not the general UCF state model.
 
 Before doing any extraction, schema, or domain work, always read the relevant canon document:
 - `canon/docs/event_taxonomy.md` — what counts as an event, event types, required fields
@@ -93,7 +111,7 @@ Use the right model for the right job:
 
 Default routing is defined in `foundry/orchestration/model_router.py`. Override via `model_override` in task requests only when justified.
 
-## Language Boundaries
+## Historical Foundry Language Boundaries
 
 - **Go** — unicorn-app backend (API, workers). When implementing Go code, follow the patterns already in `services/api/`.
 - **TypeScript** — unicorn-app frontend (Next.js). Follow patterns in `apps/web/`.
@@ -101,7 +119,7 @@ Default routing is defined in `foundry/orchestration/model_router.py`. Override 
 
 Never mix these. A task that touches Go code uses the backend-implementer subagent. A task that touches TS uses the frontend-implementer. Foundry itself is always Python.
 
-## How Runs Work
+## Historical Foundry Run Lifecycle
 
 1. A task is submitted via the control plane API.
 2. A worktree is created for the target repo + branch.
