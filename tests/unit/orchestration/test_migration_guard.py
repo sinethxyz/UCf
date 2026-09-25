@@ -26,10 +26,10 @@ from foundry.contracts.shared import (
 )
 from foundry.contracts.task_types import TaskRequest
 from foundry.db.queries.runs import create_run, get_run, get_run_events
-from foundry.orchestration.run_engine import (
+from foundry.orchestration.run_engine import RunEngine
+from foundry.verification.policy import (
     MIGRATION_GUARD_ALLOWED_TASK_TYPES,
-    RunEngine,
-    _match_protected_paths,
+    match_protected_paths,
 )
 from foundry.storage.artifact_store import ArtifactStore, ArtifactType
 
@@ -286,55 +286,55 @@ class TestProtectedPathDetection:
 
     def test_migrations_prefix_detected(self):
         files = ["migrations/0042_add_signals_table.py"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_nested_migrations_prefix_detected(self):
         files = ["foundry/db/migrations/0042_add_signals_table.py"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_auth_prefix_detected(self):
         files = ["auth/middleware.go"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_infra_prefix_detected(self):
         files = ["infra/terraform/main.tf"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_dockerfile_glob_detected(self):
         files = ["Dockerfile"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_dockerfile_with_suffix_detected(self):
         files = ["Dockerfile.prod"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_nested_dockerfile_detected(self):
         files = ["services/api/Dockerfile"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_docker_compose_detected(self):
         files = ["docker-compose.yml"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_docker_compose_override_detected(self):
         files = ["docker-compose.override.yml"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_secret_keyword_detected(self):
         files = ["config/secrets.yaml"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_credential_keyword_detected(self):
         files = ["deploy/credentials.json"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_token_keyword_detected(self):
         files = ["auth/token_store.go"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_case_insensitive_keyword_matching(self):
         files = ["config/AWS_CREDENTIALS.json"]
-        assert _match_protected_paths(files) == files
+        assert match_protected_paths(files) == files
 
     def test_no_protected_paths_returns_empty(self):
         files = [
@@ -342,10 +342,10 @@ class TestProtectedPathDetection:
             "services/api/search/handler_test.go",
             "packages/contracts/openapi.yaml",
         ]
-        assert _match_protected_paths(files) == []
+        assert match_protected_paths(files) == []
 
     def test_empty_file_list_returns_empty(self):
-        assert _match_protected_paths([]) == []
+        assert match_protected_paths([]) == []
 
     def test_mixed_protected_and_normal_files(self):
         files = [
@@ -354,7 +354,7 @@ class TestProtectedPathDetection:
             "auth/middleware.go",
             "packages/contracts/openapi.yaml",
         ]
-        result = _match_protected_paths(files)
+        result = match_protected_paths(files)
         assert "migrations/0042_add_signals_table.py" in result
         assert "auth/middleware.go" in result
         assert "services/api/search/handler.go" not in result
@@ -369,7 +369,7 @@ class TestProtectedPathDetection:
             "docker-compose.yml",
             "config/secrets.yaml",
         ]
-        result = _match_protected_paths(files)
+        result = match_protected_paths(files)
         assert len(result) == 6
 
 

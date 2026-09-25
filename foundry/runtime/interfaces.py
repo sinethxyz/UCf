@@ -55,6 +55,7 @@ class TransitionVerifier(Protocol):
         after: StateSnapshot,
         action: ActionProposal,
         action_evidence: list[EvidenceRef],
+        workspace: str,
     ) -> VerificationDecision:
         ...
 

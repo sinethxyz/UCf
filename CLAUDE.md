@@ -37,9 +37,9 @@ The original Unicorn chain — **Signals → Evidence → State → Legibility**
 
 Do not mass-rename or delete historical Foundry code merely to make terminology look generic. Generalization must be earned through exercised interfaces and tests.
 
-When touching new UCF foundation code, prefer the contracts under `foundry/contracts/transition_models.py`, `foundry/runtime/`, `foundry/environments/`, and `foundry/providers/base.py`.
+When touching new UCF foundation code, prefer `foundry/contracts/transition_models.py`, `foundry/runtime/`, `foundry/environments/`, `foundry/adapters/`, `foundry/providers/base.py`, `foundry/storage/transition_journal.py`, and `foundry/verification/policy.py`.
 
-When touching historical Foundry code, preserve existing behavior unless the task explicitly migrates that behavior onto the new transition interfaces.
+When touching historical Foundry code, preserve existing behavior unless the task explicitly migrates that behavior onto the new transition interfaces. `FoundryTransitionRuntime` is the concrete compatibility bridge; do not create a second parallel adapter path.
 
 ## Non-Negotiable Rules
 
