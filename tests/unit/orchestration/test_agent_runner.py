@@ -7,7 +7,7 @@ import pytest
 
 from foundry.contracts.shared import Complexity, MCPProfile, TaskType
 from foundry.contracts.task_types import PlanArtifact, PlanStep, TaskRequest
-from foundry.orchestration.agent_runner import AgentRunner, PLANNER_TOOLS
+from foundry.orchestration.agent_runner import PLANNER_TOOLS, AgentRunner
 
 
 # ---------------------------------------------------------------------------
