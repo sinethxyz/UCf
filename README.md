@@ -1,83 +1,155 @@
-# Unicorn Foundry
+# UCF
 
-Internal Claude orchestration system for [Unicorn Protocol](https://github.com/sinethxyz/ucf). Plans, builds, reviews, extracts, evaluates, and improves the Unicorn system through controlled, artifact-producing runs.
+**An experiment in persistent machine operation across changing state.**
 
-Foundry is not a chatbot. It is a **controlled run engine** that produces artifacts, diffs, PRs, and structured data.
+UCF began as Unicorn Foundry, the execution side of a discontinued project called Unicorn. Unicorn explored how a changing environment could be made machine-legible through **signals → evidence → state → legibility**. UCF explored the complementary problem: once a machine has a representation of its current environment, how can it change that environment deliberately, determine what actually happened, and continue from the resulting state?
 
-## Core Thesis
+The original implementation was built around Claude and software-engineering workflows. The underlying systems question was broader:
 
-Unicorn Protocol makes startup reality computationally legible.
+> **What must exist around an intelligent model for it to remain coherent while the environment it operates in changes?**
 
-**Signals → Evidence → State → Legibility**
+UCF treats the model as a participant in the system, not the system itself.
 
-A startup emits signals. Those signals become evidence. Evidence is used to infer state. State becomes legible to humans and software. Everything Foundry builds serves that chain.
+## The Loop
 
-## How It Works
-
-1. A task is submitted via the control plane API (`POST /v1/runs`).
-2. A git worktree is created for the target repo and branch.
-3. A **planner** subagent produces a structured `PlanArtifact` (JSON).
-4. An **implementer** subagent executes the plan in the worktree.
-5. Deterministic **verification** runs (build, test, lint, schema validation).
-6. A **reviewer** subagent independently reviews the diff (without seeing the plan).
-7. If approved, a PR is opened. All artifacts are stored.
-
-Every operation is isolated, logged, and reproducible. Failed runs can be retried. Any run can be cancelled.
-
-## Architecture
-
+```text
+WORLD
+  │
+  ▼
+OBSERVATION
+  │
+  ▼
+EVIDENCE
+  │
+  ▼
+STATE(t)
+  │
+  ▼
+REASON / DECIDE
+  │
+  ▼
+INTENT
+  │
+  ▼
+PLAN
+  │
+  ▼
+CONTROLLED EXECUTION
+  │
+  ▼
+VERIFICATION / REVIEW
+  │
+  ▼
+OUTCOME
+  │
+  ▼
+STATE(t+1)
+  └──────────────↻
 ```
-                    ┌─────────────────────────────────────────┐
-                    │            EXTERNAL INPUTS               │
-                    │  human specs   raw sources   bug reports  │
-                    │  eval datasets   canon updates            │
-                    └──────────────────┬──────────────────────┘
-                                       │
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                          unicorn-foundry                                 │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │                    FastAPI Control Plane                           │  │
-│  │                                                                    │  │
-│  │  POST /v1/runs          GET /v1/runs/{id}                         │  │
-│  │  POST /v1/runs/{id}/cancel   POST /v1/runs/{id}/retry            │  │
-│  │  GET  /v1/runs/{id}/events   GET  /v1/runs/{id}/artifacts        │  │
-│  │  POST /v1/reviews       POST /v1/specs/plan                       │  │
-│  │  POST /v1/patches/apply POST /v1/batches/extract                  │  │
-│  │  GET  /v1/batches/{id}  GET  /v1/batches/{id}/results            │  │
-│  │  POST /v1/evals/run     GET  /v1/evals/{id}                      │  │
-│  │  POST /v1/worktrees/cleanup   GET /v1/health                     │  │
-│  └────────────────────────┬───────────────────────────────────────────┘  │
-│                           │                                              │
-│            ┌──────────────┼──────────────┐                               │
-│            ▼              ▼              ▼                                │
-│  ┌──────────────┐ ┌─────────────┐ ┌──────────────┐                      │
-│  │ Orchestrator │ │   Batch     │ │   Eval       │                      │
-│  │ (Agent SDK)  │ │ Processor   │ │  Runner      │                      │
-│  └──────┬───────┘ └──────┬──────┘ └──────┬───────┘                      │
-│         │                │               │                               │
-│         ▼                ▼               ▼                                │
-│  ┌──────────────────────────────────────────────────────────────────┐    │
-│  │                    Claude Layer                                   │    │
-│  │  CLAUDE.md   agents   skills   hooks   rules   MCP profiles     │    │
-│  └──────────────────────────────────────────────────────────────────┘    │
-│                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐    │
-│  │                    Storage Layer                                   │    │
-│  │  PostgreSQL: runs, events, artifacts, worktrees, batches, evals  │    │
-│  │  Redis: task queue, run status pub/sub                            │    │
-│  │  Object storage: plans, diffs, patches, logs                      │    │
-│  └──────────────────────────────────────────────────────────────────┘    │
-└────────────────────────────────┬─────────────────────────────────────────┘
-                                 │  git worktrees / PRs / artifacts
-                                 ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            unicorn-app                                   │
-│  Next.js (TS)  →  Go API  →  PostgreSQL + pgvector                      │
-│  Domains: companies, events, evidence, state, scoring, search           │
-└──────────────────────────────────────────────────────────────────────────┘
+
+The important object is the **state transition**.
+
+A model may reason, plan, classify, review, or propose an action. UCF surrounds those capabilities with explicit state, typed transitions, isolated execution, deterministic verification, independent evaluation, durable artifacts, and event history.
+
+That distinction can be summarized as:
+
+**intelligence at an instant ≠ intelligence through time**
+
+## Origin
+
+UCF was originally implemented as **Unicorn Foundry**, an internal control plane for Unicorn Protocol.
+
+The two projects explored opposite sides of one loop:
+
+```text
+Unicorn
+signals → evidence → state → legibility
+
+UCF / Unicorn Foundry
+state → intent → plan → action → verification → transition
 ```
+
+Together, the intended system was:
+
+```text
+world
+  ↓
+representation
+  ↓
+intelligence
+  ↓
+controlled action
+  ↓
+world'
+  ↓
+representation'
+  ↻
+```
+
+Unicorn is no longer an active project. UCF is being preserved and generalized because the infrastructure problem it exposed is not specific to Unicorn.
+
+This repository does **not** claim to implement a learned world model or a complete architecture for general intelligence. It is a software-systems experiment in maintaining coherent machine operation across observation, action, consequence, and time.
+
+## What The Existing Implementation Actually Contains
+
+The historical Foundry implementation already provides concrete machinery for this experiment:
+
+- a typed run-state machine;
+- isolated git worktrees for actions;
+- structured planning artifacts;
+- model/provider routing;
+- deterministic build, test, lint, and schema verification;
+- independent diff review;
+- persistent run events and artifacts;
+- PostgreSQL-backed run state;
+- Redis-backed work queues;
+- evidence and extraction contracts;
+- evaluation infrastructure;
+- deterministic hooks for policy enforcement;
+- retry, cancellation, and failure states.
+
+Some originally planned paths remain incomplete. In particular, parts of the extraction/batch pipeline are still Phase 1 stubs. The repository should therefore be read as a working experimental system with unfinished surfaces, not as a completed general architecture.
+
+## Historical Implementation
+
+The codebase still uses its original **Foundry** terminology and contains Unicorn-specific adapters, schemas, task types, and documentation. Those are retained for now because they are evidence of how the experiment emerged.
+
+The current restructuring deliberately starts with the **conceptual boundary** before rewriting the runtime:
+
+```text
+historical implementation        generalized interpretation
+
+Unicorn state             →      environment state
+Unicorn canon             →      state/evidence contracts
+Claude                    →      intelligence provider
+Foundry run               →      controlled state transition
+git worktree              →      isolated action environment
+verification              →      transition validation
+review                    →      independent evaluation
+run artifacts             →      durable transition evidence
+PR                        →      one possible action outcome
+```
+
+The long-term architecture should not require Claude, GitHub, source code, or Unicorn. Those are properties of the first implementation, not invariants of UCF.
+
+## Architectural Invariants
+
+1. **State is explicit.** The system should not depend on a model reconstructing its entire operating reality from a prompt.
+2. **Actions produce transitions.** Work is understood as movement from a known state to a resulting state.
+3. **Evidence survives inference.** Claims about what happened should remain traceable to observations and artifacts.
+4. **Execution is controlled.** Intelligence proposes or performs actions inside explicit boundaries.
+5. **Verification is separate from generation.** Producing an action and establishing that it worked are different operations.
+6. **History is durable.** Meaningful transitions leave events and artifacts behind.
+7. **Models are replaceable participants.** UCF should not depend conceptually on one provider, model family, or reasoning architecture.
+8. **Continuity is a systems property.** Long-horizon coherence comes from the loop around intelligence as well as from intelligence itself.
+
+## Current Direction
+
+This repository is being reopened as UCF rather than maintained as an active Unicorn Foundry product.
+
+The immediate goal is to preserve the original implementation, separate its general mechanisms from Unicorn-specific assumptions, and make the experiment legible before changing its runtime architecture.
+
+See [RETROSPECTIVE.md](RETROSPECTIVE.md) for the present-day interpretation of the experiment and [docs/architecture.md](docs/architecture.md) for the original Foundry architecture specification.
 
 ## Repo Structure
 
