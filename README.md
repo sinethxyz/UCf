@@ -147,16 +147,17 @@ The long-term architecture should not require Claude, GitHub, source code, or Un
 
 This repository is being reopened as UCF rather than maintained as an active Unicorn Foundry product.
 
-A provider-neutral vNext foundation now lives alongside the historical Foundry runtime:
+A provider-neutral UCF foundation now lives alongside the historical Foundry runtime:
 
 - `IntelligenceProvider` separates orchestration from a concrete model vendor;
 - `ExecutionEnvironment` separates isolated execution from Git worktrees;
 - provider-neutral transition contracts represent state, evidence, actions, observations, verification, and outcomes;
-- `TransitionEngine` closes a minimal state → action → observation → verification → outcome loop;
+- `TransitionEngine` closes a state → action → observation → verification → outcome loop;
 - `TransitionJournal` requires the verified outcome to survive the call;
-- tests exercise that loop with a non-Unicorn environment and fake components.
+- `FoundryTransitionRuntime` maps the historical planner, implementer, verifier, migration guard, worktree manager, and artifact store onto those interfaces;
+- integration tests exercise that adapter with a real Git repository and real worktree isolation.
 
-This does **not** mean the legacy Foundry runtime has already been generalized. `RunEngine`, verification, prompts, PR handling, persistence names, and parts of configuration remain software/Git/Claude-shaped. They will be migrated incrementally after the generic boundary is proven.
+The abstraction is therefore exercised by the original machinery, not only by fakes. The remaining P0 boundary is **runtime convergence**: the backwards-compatible `RunEngine` still owns the old database/event/PR lifecycle and must delegate its core transition work to the UCF path. PR creation should become publication after an accepted transition rather than the definition of completion.
 
 See [RETROSPECTIVE.md](RETROSPECTIVE.md) for the present-day interpretation, [docs/runtime-decoupling-audit.md](docs/runtime-decoupling-audit.md) for the migration map, and [docs/architecture.md](docs/architecture.md) for the original Foundry architecture specification.
 
@@ -178,9 +179,12 @@ UCf/
 │   ├── runtime/
 │   │   ├── interfaces.py             # observer/planner/executor/verifier/journal
 │   │   └── transition_engine.py      # provider-neutral state-transition loop
+│   ├── adapters/
+│   │   └── foundry_transition.py     # historical Foundry -> UCF capability bridge
 │   ├── environments/
 │   │   ├── base.py                   # ExecutionEnvironment contract
-│   │   └── git_worktree.py           # first concrete environment adapter
+│   │   ├── git_worktree.py           # concrete execution environment adapter
+│   │   └── git_observer.py           # explicit before/after Git state
 │   ├── providers/
 │   │   ├── base.py                   # IntelligenceProvider contract
 │   │   └── claude_*.py               # historical/default Claude adapters
@@ -189,7 +193,8 @@ UCf/
 │   ├── git/                          # historical Git/PR action surface
 │   ├── tasks/                        # historical Foundry task implementations
 │   ├── db/                           # historical run persistence
-│   └── storage/                      # historical artifact persistence
+│   └── storage/
+│       └── transition_journal.py     # durable UCF outcome adapter
 ├── app/                              # historical FastAPI control plane
 ├── workers/                          # historical background workers
 ├── canon/                            # historical Unicorn domain contracts
