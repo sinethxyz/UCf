@@ -15,7 +15,7 @@ from foundry.contracts.shared import TaskType
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.orchestration import prompt_templates
 from foundry.orchestration.model_router import resolve_model
-from foundry.providers.claude_agent import ClaudeAgentProvider
+from foundry.providers.base import IntelligenceProvider\nfrom foundry.providers.claude_agent import ClaudeAgentProvider
 
 logger = logging.getLogger(__name__)
 
