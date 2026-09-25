@@ -33,6 +33,10 @@ from foundry.db.models import RunEvent as RunEventORM
 from foundry.db.queries import artifacts as artifact_queries
 from foundry.db.queries import runs as run_queries
 from foundry.storage.artifact_store import ArtifactType
+from foundry.verification.policy import (
+    MIGRATION_GUARD_ALLOWED_TASK_TYPES,
+    match_protected_paths,
+)
 
 if TYPE_CHECKING:
     from foundry.git.pr import PRCreator
@@ -157,63 +161,6 @@ _RETRYABLE_STATES: set[RunState] = {
 }
 
 QUEUE_KEY = "foundry:runs"
-
-# ---------------------------------------------------------------------------
-# Protected path patterns for migration guard.
-# Any changed file matching these triggers the migration guard subagent.
-# ---------------------------------------------------------------------------
-
-PROTECTED_PATH_PREFIXES: tuple[str, ...] = ("migrations/", "auth/", "infra/")
-PROTECTED_PATH_GLOBS: tuple[str, ...] = ("Dockerfile*", "docker-compose*")
-PROTECTED_PATH_KEYWORDS: tuple[str, ...] = ("secret", "credential", "token")
-
-# Task types allowed to modify protected paths (escalated to LLM review).
-# All other task types that touch protected paths are auto-rejected.
-MIGRATION_GUARD_ALLOWED_TASK_TYPES: set[TaskType] = {
-    TaskType.ENDPOINT_BUILD,
-    TaskType.REFACTOR,
-    TaskType.MIGRATION_PLAN,
-    TaskType.CANON_UPDATE,
-}
-
-
-def _match_protected_paths(changed_files: list[str]) -> list[str]:
-    """Return the subset of changed_files that match protected path patterns.
-
-    Matches against:
-    - Prefix: migrations/, auth/, infra/
-    - Glob: Dockerfile*, docker-compose*
-    - Keyword: *secret*, *credential*, *token* (case-insensitive)
-
-    Args:
-        changed_files: List of file paths from the diff.
-
-    Returns:
-        List of file paths that match at least one protected pattern.
-    """
-    import fnmatch
-
-    protected: list[str] = []
-    for f in changed_files:
-        # Check prefix matches (handle both "migrations/..." and "some/migrations/...")
-        if any(f.startswith(prefix) or f"/{prefix}" in f for prefix in PROTECTED_PATH_PREFIXES):
-            protected.append(f)
-            continue
-
-        # Check glob matches against the basename
-        basename = f.rsplit("/", 1)[-1] if "/" in f else f
-        if any(fnmatch.fnmatch(basename, g) for g in PROTECTED_PATH_GLOBS):
-            protected.append(f)
-            continue
-
-        # Check keyword matches (case-insensitive) against the full path
-        f_lower = f.lower()
-        if any(kw in f_lower for kw in PROTECTED_PATH_KEYWORDS):
-            protected.append(f)
-            continue
-
-    return protected
-
 
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a git diff."""
@@ -1245,7 +1192,7 @@ class RunEngine:
             ReviewVerdict if migration guard was triggered, None if no
             protected paths were touched.
         """
-        protected_files = _match_protected_paths(changed_files)
+        protected_files = match_protected_paths(changed_files)
 
         if not protected_files:
             return None
