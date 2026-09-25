@@ -14,10 +14,17 @@ from foundry.contracts.shared import (
 
 
 class TaskRequest(FoundryBaseModel):
-    """A requested controlled transition.\n\n    ``repo`` is retained for backwards compatibility with the Git-based first\n    implementation, but is no longer restricted to Unicorn repositories.\n    """
+    """A requested controlled transition.
+
+    "repo" is retained for backwards compatibility with the Git-based first
+    implementation, but is no longer restricted to Unicorn repositories.
+    """
 
     task_type: TaskType
-    repo: str = Field(min_length=1, description="Execution target identifier; historically a Git repository")
+    repo: str = Field(
+        min_length=1,
+        description="Execution target identifier; historically a Git repository",
+    )
     base_branch: str = "main"
     title: str
     prompt: str
@@ -31,7 +38,6 @@ class TaskRequest(FoundryBaseModel):
     open_pr: bool = True
     priority: int = 0
     metadata: dict = Field(default_factory=dict)
-
 
 class PlanStep(FoundryBaseModel):
     """A single step in an implementation plan."""
