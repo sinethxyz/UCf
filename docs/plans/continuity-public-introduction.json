@@ -1,0 +1,41 @@
+{
+  "task_id": "282f117f-e976-4ca2-871a-242a41a1526b",
+  "steps": [
+    {
+      "file_path": "LEGACY_FOUNDRY.md",
+      "action": "create",
+      "rationale": "Preserve the complete pre-rebrand README byte-for-byte at repository root so its relative links remain valid. Source commit: 2639b8ebeeb485950a8faed17491b03ff440b354; source blob: 7caeb132210e40d8f98ed587204eef41cb03d2dd.",
+      "dependencies": []
+    },
+    {
+      "file_path": "README.md",
+      "action": "modify",
+      "rationale": "Introduce Continuity publicly through the original engineering problem, architecture, evidence, limitations, and historical origin. Distinguish merged code from the unmerged evidence-retention PR #6.",
+      "dependencies": ["LEGACY_FOUNDRY.md"]
+    },
+    {
+      "file_path": "CLAUDE.md",
+      "action": "modify",
+      "rationale": "Add the public-name and compatibility boundary without changing the existing technical guidance or historical rules.",
+      "dependencies": ["README.md"]
+    },
+    {
+      "file_path": "docs/publication.md",
+      "action": "create",
+      "rationale": "Record the approved repository name, description, topics, draft announcement, evidence boundaries, and outstanding owner-admin and licence decisions.",
+      "dependencies": ["README.md"]
+    }
+  ],
+  "risks": [
+    "The available GitHub connector cannot change repository name, description, or topics; do not report those admin actions as completed.",
+    "Do not merge PR #6 or this documentation PR without separate approval.",
+    "Do not advertise pending branch functionality as merged or imply that passing deterministic tests proves live autonomous operation.",
+    "Preserve existing licensing terms; public-facing documentation is not authorization to grant an open-source licence.",
+    "Keep foundry imports, package metadata, runtime code, workflow names, and historical commits unchanged."
+  ],
+  "open_questions": [
+    "Repository owner must apply the GitHub Settings and About changes.",
+    "Repository owner must decide licensing before describing the project as open source or inviting external reuse."
+  ],
+  "estimated_complexity": "small"
+}

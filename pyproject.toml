@@ -1,8 +1,9 @@
 [project]
 name = "unicorn-foundry"
 version = "0.1.0"
-description = "UCF experiment in persistent machine operation across changing state"
+description = "An experimental runtime for persistent machine intelligence across state, action, verification, and time."
 requires-python = ">=3.12"
+license = "AGPL-3.0-only"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
