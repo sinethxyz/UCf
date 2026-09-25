@@ -10,6 +10,7 @@ from foundry.contracts.transition_models import (
     StateSnapshot,
     TransitionRequest,
     VerificationDecision,
+    TransitionOutcome,
 )
 
 
@@ -55,4 +56,11 @@ class TransitionVerifier(Protocol):
         action: ActionProposal,
         action_evidence: list[EvidenceRef],
     ) -> VerificationDecision:
+        ...
+
+
+class TransitionJournal(Protocol):
+    """Persist the verified outcome so continuity does not depend on call context."""
+
+    async def record(self, outcome: "TransitionOutcome") -> None:
         ...
