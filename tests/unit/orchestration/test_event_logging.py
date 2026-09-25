@@ -204,7 +204,7 @@ class TestHappyPathEventLogging:
         assert any("go_test passed" in m for m in messages)
         assert any("Verification passed" in m for m in messages)
         assert any("Blind review started" in m for m in messages)
-        assert any("Review verdict:" in m for m in messages)
+        assert any("Review complete:" in m for m in messages)
         assert any("PR #99 opened" in m for m in messages)
         assert any("Run completed successfully" in m for m in messages)
 
@@ -357,7 +357,7 @@ class TestHappyPathEventLogging:
         assert review_started.model_used is not None
         assert "model" in review_started.metadata_
 
-        review_done = next(e for e in events if "Review verdict:" in e.message)
+        review_done = next(e for e in events if "Review complete:" in e.message)
         assert "approve" in review_done.metadata_["verdict"]
         assert review_done.metadata_["issue_count"] == 0
         assert review_done.duration_ms is not None
@@ -519,7 +519,7 @@ class TestFailurePathEventLogging:
         messages = [e.message for e in events]
 
         assert any("Blind review started" in m for m in messages)
-        assert any("Review verdict: reject" in m for m in messages)
+        assert any("Review complete: reject" in m for m in messages)
 
         # The transition event to review_failed should have verdict metadata
         fail_events = [e for e in events if e.state == "review_failed"]
