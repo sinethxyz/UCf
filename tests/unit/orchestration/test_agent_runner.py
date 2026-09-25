@@ -1,8 +1,4 @@
-"""Tests for AgentRunner — mock Claude client.
-
-Tests verify that run_agent and run_planner correctly delegate to the
-ClaudeAgentProvider with expected arguments and handle responses properly.
-"""
+"""Tests for AgentRunner provider delegation and role behavior."""
 
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -58,6 +54,12 @@ def sample_plan_artifact() -> PlanArtifact:
 @pytest.fixture
 def runner() -> AgentRunner:
     return AgentRunner(api_key="test-key")
+
+
+def test_runner_accepts_injected_provider() -> None:
+    provider = MagicMock()
+    runner = AgentRunner(provider=provider)
+    assert runner.provider is provider
 
 
 # ---------------------------------------------------------------------------
