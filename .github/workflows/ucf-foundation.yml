@@ -3,9 +3,13 @@ name: UCF foundation
 on:
   pull_request:
     paths:
+      - "foundry/adapters/**"
       - "foundry/contracts/transition_models.py"
       - "foundry/environments/**"
       - "foundry/providers/base.py"
+      - "foundry/storage/artifact_store.py"
+      - "foundry/storage/transition_journal.py"
+      - "foundry/verification/policy.py"
       - "foundry/runtime/**"
       - "foundry/orchestration/agent_runner.py"
       - "foundry/orchestration/run_engine.py"
@@ -36,9 +40,9 @@ jobs:
         run: python -m compileall -q foundry tests
       - name: Lint changed foundation
         run: |
-          ruff check foundry/contracts/transition_models.py foundry/contracts/task_types.py foundry/environments foundry/providers/base.py foundry/runtime foundry/orchestration/agent_runner.py foundry/orchestration/run_engine.py tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/orchestration/test_agent_runner.py
+          ruff check foundry/adapters foundry/contracts/transition_models.py foundry/contracts/task_types.py foundry/environments foundry/providers/base.py foundry/runtime foundry/storage/artifact_store.py foundry/storage/transition_journal.py foundry/verification/policy.py foundry/orchestration/agent_runner.py foundry/orchestration/run_engine.py tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/runtime/test_foundry_transition_adapter.py tests/unit/orchestration/test_agent_runner.py
       - name: Test foundation
         run: |
-          pytest -q tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/orchestration/test_agent_runner.py
+          pytest -q tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/runtime/test_foundry_transition_adapter.py tests/unit/orchestration/test_agent_runner.py
       - name: Test full suite
         run: pytest -q
