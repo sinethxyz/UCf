@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Literal
+from typing import Literal
 
 from foundry.contracts.review_models import ReviewVerdict
 from foundry.contracts.shared import TaskType
