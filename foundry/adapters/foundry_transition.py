@@ -21,6 +21,7 @@ from foundry.contracts.transition_models import (
 from foundry.environments.git_observer import GitStateObserver
 from foundry.environments.git_worktree import GitWorktreeEnvironment
 from foundry.git.branch import generate_branch_name
+from foundry.git.worktree import WorktreeManager
 from foundry.orchestration.agent_runner import AgentRunner
 from foundry.runtime.transition_engine import TransitionEngine
 from foundry.storage.artifact_store import ArtifactStore
@@ -277,7 +278,7 @@ class FoundryTransitionRuntime:
     def __init__(
         self,
         *,
-        worktree_manager,
+        worktree_manager: WorktreeManager,
         agent_runner: AgentRunner,
         verification_runner: VerificationRunner,
         artifact_store: ArtifactStore,
