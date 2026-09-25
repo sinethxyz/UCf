@@ -147,9 +147,18 @@ The long-term architecture should not require Claude, GitHub, source code, or Un
 
 This repository is being reopened as UCF rather than maintained as an active Unicorn Foundry product.
 
-The immediate goal is to preserve the original implementation, separate its general mechanisms from Unicorn-specific assumptions, and make the experiment legible before changing its runtime architecture.
+A provider-neutral vNext foundation now lives alongside the historical Foundry runtime:
 
-See [RETROSPECTIVE.md](RETROSPECTIVE.md) for the present-day interpretation of the experiment and [docs/architecture.md](docs/architecture.md) for the original Foundry architecture specification.
+- `IntelligenceProvider` separates orchestration from a concrete model vendor;
+- `ExecutionEnvironment` separates isolated execution from Git worktrees;
+- provider-neutral transition contracts represent state, evidence, actions, observations, verification, and outcomes;
+- `TransitionEngine` closes a minimal state → action → observation → verification → outcome loop;
+- `TransitionJournal` requires the verified outcome to survive the call;
+- tests exercise that loop with a non-Unicorn environment and fake components.
+
+This does **not** mean the legacy Foundry runtime has already been generalized. `RunEngine`, verification, prompts, PR handling, persistence names, and parts of configuration remain software/Git/Claude-shaped. They will be migrated incrementally after the generic boundary is proven.
+
+See [RETROSPECTIVE.md](RETROSPECTIVE.md) for the present-day interpretation, [docs/runtime-decoupling-audit.md](docs/runtime-decoupling-audit.md) for the migration map, and [docs/architecture.md](docs/architecture.md) for the original Foundry architecture specification.
 
 ## Repo Structure
 
