@@ -63,6 +63,7 @@ class TransitionEngine:
                 after=after,
                 action=action,
                 action_evidence=action_evidence,
+                workspace=workspace,
             )
 
             observation = TransitionObservation(
