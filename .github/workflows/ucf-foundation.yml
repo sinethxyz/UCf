@@ -8,6 +8,7 @@ on:
       - "foundry/providers/base.py"
       - "foundry/runtime/**"
       - "foundry/orchestration/agent_runner.py"
+      - "foundry/orchestration/run_engine.py"
       - "foundry/contracts/task_types.py"
       - "tests/unit/runtime/**"
       - "tests/unit/test_transition_models.py"
@@ -35,7 +36,7 @@ jobs:
         run: python -m compileall -q foundry tests
       - name: Lint changed foundation
         run: |
-          ruff check foundry/contracts/transition_models.py foundry/contracts/task_types.py foundry/environments foundry/providers/base.py foundry/runtime foundry/orchestration/agent_runner.py tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/orchestration/test_agent_runner.py
+          ruff check foundry/contracts/transition_models.py foundry/contracts/task_types.py foundry/environments foundry/providers/base.py foundry/runtime foundry/orchestration/agent_runner.py foundry/orchestration/run_engine.py tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/orchestration/test_agent_runner.py
       - name: Test foundation
         run: |
           pytest -q tests/unit/test_transition_models.py tests/unit/runtime/test_transition_engine.py tests/unit/orchestration/test_agent_runner.py
