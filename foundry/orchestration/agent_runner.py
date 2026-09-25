@@ -1,20 +1,21 @@
-"""Agent SDK wrapper for running subagents.
+"""Provider-neutral runner for planning, implementation, review, and exploration.
 
-Wraps the Claude Agent SDK to execute planner, implementer, reviewer,
-and extractor subagents with appropriate tool access and system prompts.
+Claude remains the default backend for the historical implementation, but the
+runner depends on the IntelligenceProvider contract rather than a vendor type.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Literal
+from typing import Literal
 
 from foundry.contracts.review_models import ReviewVerdict
 from foundry.contracts.shared import TaskType
 from foundry.contracts.task_types import PlanArtifact, TaskRequest
 from foundry.orchestration import prompt_templates
 from foundry.orchestration.model_router import resolve_model
+from foundry.providers.base import IntelligenceProvider
 from foundry.providers.claude_agent import ClaudeAgentProvider
 
 logger = logging.getLogger(__name__)
@@ -33,15 +34,20 @@ MIGRATION_GUARD_TOOLS: list[str] = ["Read", "Grep", "Glob"]  # Read-only access
 
 
 class AgentRunner:
-    """Wraps the Anthropic Agent SDK to run subagents with specific roles.
+    """Run role-specific operations through a replaceable intelligence provider.
 
-    Each subagent gets its own context window, tool access list, and system
-    prompt. The runner handles serialization of structured outputs and
-    validation against expected schemas.
+    Each role gets its own context, tool access, and system prompt. Claude is
+    the backwards-compatible default, not an architectural requirement.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.provider = ClaudeAgentProvider(api_key=api_key)
+    def __init__(
+        self,
+        api_key: str | None = None,
+        provider: IntelligenceProvider | None = None,
+    ) -> None:
+        self.provider: IntelligenceProvider = (
+            provider if provider is not None else ClaudeAgentProvider(api_key=api_key)
+        )
 
     async def run_agent(
         self,
@@ -52,9 +58,9 @@ class AgentRunner:
         output_schema: type | None = None,
         worktree_path: str | None = None,
     ) -> dict:
-        """Execute a Claude subagent with the given configuration.
+        """Execute a role through the configured intelligence provider.
 
-        Delegates to the ClaudeAgentProvider. When output_schema is provided,
+        When output_schema is provided,
         uses run_with_structured_output for validated JSON responses.
         Otherwise uses run for free-form text/JSON responses.
 

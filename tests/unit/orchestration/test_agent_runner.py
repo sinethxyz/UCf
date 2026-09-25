@@ -1,8 +1,4 @@
-"""Tests for AgentRunner — mock Claude client.
-
-Tests verify that run_agent and run_planner correctly delegate to the
-ClaudeAgentProvider with expected arguments and handle responses properly.
-"""
+"""Tests for AgentRunner provider delegation and role behavior."""
 
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -11,8 +7,7 @@ import pytest
 
 from foundry.contracts.shared import Complexity, MCPProfile, TaskType
 from foundry.contracts.task_types import PlanArtifact, PlanStep, TaskRequest
-from foundry.orchestration.agent_runner import AgentRunner, PLANNER_TOOLS
-
+from foundry.orchestration.agent_runner import PLANNER_TOOLS, AgentRunner
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -58,6 +53,12 @@ def sample_plan_artifact() -> PlanArtifact:
 @pytest.fixture
 def runner() -> AgentRunner:
     return AgentRunner(api_key="test-key")
+
+
+def test_runner_accepts_injected_provider() -> None:
+    provider = MagicMock()
+    runner = AgentRunner(provider=provider)
+    assert runner.provider is provider
 
 
 # ---------------------------------------------------------------------------

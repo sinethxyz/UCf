@@ -1,7 +1,7 @@
 [project]
 name = "unicorn-foundry"
 version = "0.1.0"
-description = "Claude-powered orchestration system for Unicorn Protocol"
+description = "UCF experiment in persistent machine operation across changing state"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "aiosqlite>=0.20.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=5.0.0",
@@ -31,6 +32,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["foundry", "app", "workers"]
 
 [tool.ruff]
 target-version = "py312"
