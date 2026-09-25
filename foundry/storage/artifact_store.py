@@ -28,6 +28,7 @@ class ArtifactType(str, Enum):
     EVAL = "eval"
     ERROR_LOG = "error_log"
     PR_METADATA = "pr_metadata"
+    TRANSITION = "transition"
 
 
 class StoreResult(TypedDict):
